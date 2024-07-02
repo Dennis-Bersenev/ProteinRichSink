@@ -17,6 +17,7 @@ sc.pp.filter_cells(adata, min_counts=100) # number of rna molecules in each cell
 protein = adata[:, adata.var["feature_types"] == "Antibody Capture"].copy()
 rna = adata[:, adata.var["feature_types"] == "Gene Expression"].copy()
 
+# TODO: don't hardcode this number
 gex_train = rna[:60000, :].copy()
 gex_test = rna[60000:, :].copy()
 
@@ -54,7 +55,7 @@ import torch.optim as optim
 
 model = FeedforwardNN(input_size, hidden_size, output_size)
 
-criterion = nn.MSELoss()  # Use nn.CrossEntropyLoss() for classification
+criterion = nn.MSELoss()  
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 num_epochs = 100  # Adjust as needed
