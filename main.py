@@ -4,7 +4,7 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from utils import * 
-from models import FeedforwardNN, CVAE
+from models import FeedforwardNN, CVAE, VAE
 import torch.nn as nn
 import torch.optim as optim
 import argparse
@@ -104,8 +104,9 @@ def main():
                 test_loss += loss.item()
             
             print(f"Test Loss: {test_loss/len(test_loader):.4f}")
-    # 2 VAE
-    elif args.model == 'vae': 
+    
+    # 2 CVAE
+    elif args.model == 'cvae': 
         model = CVAE(input_size, hidden_size, latent_size, output_size)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -123,6 +124,35 @@ def main():
             
             avg_train_loss = train_loss / len(train_loader.dataset)
             print(f'Epoch {epoch + 1}, Loss: {avg_train_loss:.4f}')
+    
+    # VAE
+    elif args.model == 'vae':
+        # Train the VAE
+        model = VAE(input_size, output_size)
+        optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+
+        # Train the VAE
+        for epoch in range(100):
+            for batch_x, batch_y in train_loader:
+                optimizer.zero_grad()
+                # Get the input and target
+                x = batch_x
+                y = batch_y
+
+                # Forward pass
+                reconstructed_x, mu, var = model(x)
+
+                # Compute the loss
+                reconstruction_loss = F.mse_loss(reconstructed_x, y)
+                kl_divergence = 0.5 * torch.sum(mu ** 2 + var - torch.log(var) - 1, dim=1).mean()
+                loss = reconstruction_loss + kl_divergence
+
+                # Update the parameters
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
     else:
         # TODO
         print("unsupported")
