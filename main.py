@@ -108,8 +108,9 @@ def main():
 
     """
     TODO:
+    0. Make another file for re-running existing models! And add some code to save the stats
     1. Make the models better, manually
-    3. Normalize the protein data via best-practices!
+    2. Add the Sinkhorn layers!
     """
 
     # Training 
@@ -149,6 +150,11 @@ def main():
     test_loss /= len(test_loader.dataset)
     print(f'Test Loss: {test_loss:.4f}')
 
+    # NOTE: author eval metric
+    y_pred = model(x_test)
+    evaluate(y_pred, y_test, verbose=True)
+    
+    
     # Plotting the MSE over epochs
     plt.figure(figsize=(10, 5))
     plt.plot(range(1, num_epochs + 1), train_mse_vals, label='MSE Training Vals')

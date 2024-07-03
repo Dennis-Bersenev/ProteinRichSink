@@ -2,6 +2,7 @@ import anndata as ad
 import torch
 import numpy as np
 from sklearn.decomposition import TruncatedSVD
+from torchmetrics.functional import mean_squared_error, pearson_corrcoef, spearman_corrcoef
 
 
 
@@ -23,3 +24,28 @@ def zscore_normalization_and_svd(X: np.ndarray, n_components):
     X_lowdim = svd.fit_transform(X_normalized)
     return X_lowdim
 
+
+# Adapted from: https://github.com/DanHanh/scLinear/blob/main/inst/python/evaluate.py
+def evaluate(y_pred, y_test, verbose=True):
+
+    # Calculate RMSE
+    rmse = mean_squared_error(y_pred, y_test, squared=False).item()
+    
+    # Initialize sums
+    pearson_sum = 0
+    spearman_sum = 0
+    
+    # Calculate Pearson and Spearman correlations
+    for i in range(len(y_test)):
+        pearson_sum += pearson_corrcoef(y_test[i], y_pred[i]).item()
+        spearman_sum += spearman_corrcoef(y_test[i], y_pred[i]).item()
+    
+    pearson_corr = pearson_sum / len(y_test)
+    spearman_corr = spearman_sum / len(y_test)
+    
+    if verbose:
+        print("RMSE:", rmse)
+        print("Pearson correlation:", pearson_corr)
+        print("Spearman correlation:", spearman_corr)
+        
+    return rmse, pearson_corr, spearman_corr
