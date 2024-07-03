@@ -35,8 +35,7 @@ def main():
     # Doing normalization and SVD steps
     sc.pp.log1p(rna)
     rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
-    
-    # NOTE: NOT going to normalize the proteins (yet)
+    muon.prot.pp.clr(protein)
     protein_norm = protein.X.toarray()
     
     # 80/20 split rule
@@ -68,7 +67,7 @@ def main():
     output_size = protein_norm.shape[1]     # Number of unique proteins
     latent_size = 64                        # For VAEs
     learning_rate = 0.001
-    num_epochs = 1000
+    num_epochs = 100
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
