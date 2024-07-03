@@ -68,7 +68,7 @@ def main():
     output_size = protein_norm.shape[1]     # Number of unique proteins
     latent_size = 64                        # For VAEs
     learning_rate = 0.001
-    num_epochs = 100
+    num_epochs = 1000
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
