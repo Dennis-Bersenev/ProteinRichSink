@@ -4,11 +4,14 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from utils import * 
-from models import FeedforwardNN, CVAE, VAE
+from models import FFNN, VAE, MLP
 import torch.nn as nn
 import torch.optim as optim
 import argparse
 import math
+import matplotlib.pyplot as plt
+import muon 
+
 
 def main():
     ################################################### Data Prep #####################################################
@@ -17,147 +20,145 @@ def main():
 
     adata.var_names_make_unique()
     adata.layers["counts"] = adata.X.copy()
-    sc.pp.filter_genes(adata, min_counts=10) # number of times that RNA is present in the dataset
-    sc.pp.filter_cells(adata, min_counts=100) # number of rna molecules in each cell
+    sc.pp.filter_genes(adata, min_counts=100) # number of times that RNA is present in the dataset
+    sc.pp.filter_cells(adata, min_counts=500) # number of biomolecules in each cell
 
     protein = adata[:, adata.var["feature_types"] == "Antibody Capture"].copy()
     rna = adata[:, adata.var["feature_types"] == "Gene Expression"].copy()
+    # Filtering cells not expressing both types of biomolecules
+    sc.pp.filter_cells(rna, min_counts=1)
+    sc.pp.filter_cells(protein, min_counts=1)
+    common_cells = protein.obs_names.intersection(rna.obs_names)
+    protein = protein[common_cells, :]
+    rna = rna[common_cells, :]
+    
+    # Doing normalization and SVD steps
+    sc.pp.log1p(rna)
+    rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    muon.prot.pp.clr(protein)
+    protein_norm = protein.X.toarray()
     
     # 80/20 split rule
-    split = math.ceil(adata.n_vars * 0.8)
-    gex_train = rna[:split, :].copy()
-    gex_test = rna[split:, :].copy()
+    split = math.ceil(rna_norm.shape[0] * 0.8)
+    gex_train = rna_norm[:split, :]
+    gex_test = rna_norm[split:, :]
 
-    adx_train = protein[:60000, :].copy()
-    adx_test = protein[60000:, :].copy()
+    adx_train = protein_norm[:split, :]
+    adx_test = protein_norm[split:, :]
+    # print(rna_norm.shape)
+    # print(protein_norm.shape)
+    # print(gex_train.shape)
+    # print(adx_train.shape)
+    
+    ################################################### ML Training ###################################################
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(device)
+    
+    # Parsing model from command line
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, required=True, help='ffnn, vae, todo')
+    parser.add_argument('--desc', type=str, required=True, help='describe the experiment')
+    args = parser.parse_args()
+    
 
-    # Validate via barcodes & convert to tensors  
-    if (gex_train.obs.index.tolist() != adx_train.obs.index.tolist()) or (gex_test.obs.index.tolist() != adx_test.obs.index.tolist()):
-        raise RuntimeError("Train and Test datasets are mismatched.")
+    # Hyperparameters
+    input_size = rna_norm.shape[1]          # Number of unique rna molecules
+    hidden_size = 512                       # Hyper-parameter
+    output_size = protein_norm.shape[1]     # Number of unique proteins
+    latent_size = 64                        # For VAEs
+    learning_rate = 0.001
+    num_epochs = 100
 
-    x_train = counts_to_tensor(gex_train)
-    x_test = counts_to_tensor(gex_test)
+    x_train = torch.from_numpy(gex_train).to(device)
+    x_test = torch.from_numpy(gex_test).to(device)
 
-    y_train = counts_to_tensor(adx_train)
-    y_test = counts_to_tensor(adx_test)
+    y_train = torch.from_numpy(adx_train).to(device)
+    y_test = torch.from_numpy(adx_test).to(device)
 
 
     # Create TensorDataset and DataLoader
     train_dataset = TensorDataset(x_train, y_train)
     test_dataset = TensorDataset(x_test, y_test)
 
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
-
-    ################################################### ML Training ###################################################
-
-    # Hyperparameters
-    input_size = rna.n_vars         # Number of unique rna molecules
-    hidden_size = 512               # Hyper-parameter
-    output_size = protein.n_vars    # Number of unique proteins
-    latent_size = 64                # For VAEs
-    learning_rate = 0.001
-    num_epochs = 100
-
-
-    """
-    TODO:
-    1. Make the models better
-    2. Plot the train & test accuracy to visualize performance.
-    3. Normalize the OG data via best-practices related to cite-seq!
-    """
-
-    # Parsing model from command line
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='ffnn, vae, todo')
-    args = parser.parse_args()
 
 
     # 1) FFNN
     if args.model == 'ffnn':
-        model = FeedforwardNN(input_size, hidden_size, output_size)
-
-        criterion = nn.MSELoss()  
-        optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-        num_epochs = 1  # Adjust as needed
-
-        for epoch in range(num_epochs):
-            model.train()
-            running_loss = 0.0
-            for i, (inputs, targets) in enumerate(train_loader):
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-            
-            print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}")
-
-        model.eval()
-        with torch.no_grad():
-            test_loss = 0.0
-            for inputs, targets in test_loader:
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                test_loss += loss.item()
-            
-            print(f"Test Loss: {test_loss/len(test_loader):.4f}")
+        model = FFNN()
     
-    # 2 CVAE
-    elif args.model == 'cvae': 
-        model = CVAE(input_size, hidden_size, latent_size, output_size)
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-        # Training loop
-        for epoch in range(num_epochs):
-            model.train()
-            train_loss = 0
-            for batch_x, batch_y in train_loader:
-                optimizer.zero_grad()
-                recon_y, mu, logvar = model(batch_x)
-                loss = model.loss(recon_y, batch_y, mu, logvar)
-                loss.backward()
-                train_loss += loss.item()
-                optimizer.step()
-            
-            avg_train_loss = train_loss / len(train_loader.dataset)
-            print(f'Epoch {epoch + 1}, Loss: {avg_train_loss:.4f}')
+    # 2 VAE
+    elif args.model == 'vae': 
+        model = VAE()
     
-    # VAE
-    elif args.model == 'vae':
-        # Train the VAE
-        model = VAE(input_size, output_size)
-        optimizer = optim.Adam(model.parameters(), lr=1e-3)
-
-
-        # Train the VAE
-        for epoch in range(100):
-            for batch_x, batch_y in train_loader:
-                optimizer.zero_grad()
-                # Get the input and target
-                x = batch_x
-                y = batch_y
-
-                # Forward pass
-                reconstructed_x, mu, var = model(x)
-
-                # Compute the loss
-                reconstruction_loss = F.mse_loss(reconstructed_x, y)
-                kl_divergence = 0.5 * torch.sum(mu ** 2 + var - torch.log(var) - 1, dim=1).mean()
-                loss = reconstruction_loss + kl_divergence
-
-                # Update the parameters
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
+    # 3 MLP
+    elif args.model == 'mlp': 
+        model = MLP(input_size, output_size).to(device)
+    
     else:
-        # TODO
-        print("unsupported")
+        print("Testing")
+        # for batch_X, batch_y in train_loader:
+        #     print(batch_X, batch_y)
+        return
+    
 
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+    """
+    TODO:
+    1. Make the models better, manually
+    3. Normalize the protein data via best-practices!
+    """
+
+    # Training 
+    train_mse_vals = []
+    best_train_loss = float("inf")
+    for epoch in range(num_epochs):
+        model.train()
+        train_loss = 0.0
+        for X_batch, Y_batch in train_loader:
+            optimizer.zero_grad()
+            outputs = model(X_batch)
+            loss = criterion(outputs, Y_batch)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item() * X_batch.size(0)
+        
+        train_loss /= len(train_loader.dataset)
+        
+        train_mse_vals.append(train_loss)
+        
+        print(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}')
+        
+        if train_loss < best_train_loss:
+            best_train_loss = train_loss
+            torch.save(model.state_dict(), f'./models/{args.model}.pth')
+    
+
+    # Evals
+    # Final evaluation on test set
+    model.eval()  # Set the model to evaluation mode
+    test_loss = 0.0
+    with torch.no_grad():  # Disable gradient computation for evaluation
+        for X_batch, Y_batch in test_loader:
+            outputs = model(X_batch)
+            loss = criterion(outputs, Y_batch)
+            test_loss += loss.item() * X_batch.size(0)
+    test_loss /= len(test_loader.dataset)
+    print(f'Test Loss: {test_loss:.4f}')
+
+    # Plotting the MSE over epochs
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, num_epochs + 1), train_mse_vals, label='MSE Training Vals')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean Squared Error')
+    plt.title(f'{args.desc}: MSE During Training')
+    plt.legend()
+    plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
+    plt.show()
+    
 
 
 if __name__ == "__main__":
