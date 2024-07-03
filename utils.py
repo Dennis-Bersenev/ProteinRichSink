@@ -13,19 +13,13 @@ def counts_to_tensor(data: ad.AnnData):
 
 
 # Adapted from: https://github.com/DanHanh/scLinear/blob/main/inst/python/preprocessing.py 
-def zscore_normalization(
-        X: np.ndarray
-) -> np.ndarray:
-    """
-    Row-wise Z-score normalization.
-    Parameters
-    ----------
-    X
-        Data matrix.
-    """
-    TruncatedSVD(n_components=n_components)
+def zscore_normalization_and_svd(X: np.ndarray, n_components):
+    
+    
     X_sd = np.std(X, axis=1).reshape(-1, 1)
     X_sd[X_sd == 0] = 1
     X_normalized = (X - np.mean(X, axis=1).reshape(-1, 1)) / X_sd
-    return X_normalized.astype(np.float32)
+    svd = TruncatedSVD(n_components=n_components)
+    X_lowdim = svd.fit_transform(X_normalized)
+    return X_lowdim
 

@@ -10,6 +10,8 @@ import torch.optim as optim
 import argparse
 import math
 import matplotlib.pyplot as plt
+import muon 
+
 
 def main():
     ################################################### Data Prep #####################################################
@@ -18,8 +20,8 @@ def main():
 
     adata.var_names_make_unique()
     adata.layers["counts"] = adata.X.copy()
-    sc.pp.filter_genes(adata, min_counts=10) # number of times that RNA is present in the dataset
-    sc.pp.filter_cells(adata, min_counts=100) # number of biomolecules in each cell
+    sc.pp.filter_genes(adata, min_counts=100) # number of times that RNA is present in the dataset
+    sc.pp.filter_cells(adata, min_counts=500) # number of biomolecules in each cell
 
     protein = adata[:, adata.var["feature_types"] == "Antibody Capture"].copy()
     rna = adata[:, adata.var["feature_types"] == "Gene Expression"].copy()
@@ -31,24 +33,23 @@ def main():
     rna = rna[common_cells, :]
     
     # Doing normalization and SVD steps
-    # sc.pp.normalize_total(rna)
-    sc.pp.log1p(adata)
-    rna.X = zscore_normalization(adata.X)
-
-    print(rna)
-    return
+    sc.pp.log1p(rna)
+    rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    
+    # NOTE: NOT going to normalize the proteins (yet)
+    protein_norm = protein.X.toarray()
+    
     # 80/20 split rule
-    split = math.ceil(adata.n_vars * 0.8)
-    gex_train = rna[:split, :].copy()
-    gex_test = rna[split:, :].copy()
+    split = math.ceil(rna_norm.shape[0] * 0.8)
+    gex_train = rna_norm[:split, :]
+    gex_test = rna_norm[split:, :]
 
-    adx_train = protein[:split, :].copy()
-    adx_test = protein[split:, :].copy()
-
-    # Validate via barcodes & convert to tensors  
-    if (gex_train.obs.index.tolist() != adx_train.obs.index.tolist()) or (gex_test.obs.index.tolist() != adx_test.obs.index.tolist()):
-        raise RuntimeError("Train and Test datasets are mismatched.")
-
+    adx_train = protein_norm[:split, :]
+    adx_test = protein_norm[split:, :]
+    # print(rna_norm.shape)
+    # print(protein_norm.shape)
+    # print(gex_train.shape)
+    # print(adx_train.shape)
     
     ################################################### ML Training ###################################################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -57,22 +58,23 @@ def main():
     # Parsing model from command line
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, required=True, help='ffnn, vae, todo')
+    parser.add_argument('--desc', type=str, required=True, help='describe the experiment')
     args = parser.parse_args()
     
 
     # Hyperparameters
-    input_size = rna.n_vars         # Number of unique rna molecules
-    hidden_size = 512               # Hyper-parameter
-    output_size = protein.n_vars    # Number of unique proteins
-    latent_size = 64                # For VAEs
+    input_size = rna_norm.shape[1]          # Number of unique rna molecules
+    hidden_size = 512                       # Hyper-parameter
+    output_size = protein_norm.shape[1]     # Number of unique proteins
+    latent_size = 64                        # For VAEs
     learning_rate = 0.001
     num_epochs = 100
 
-    x_train = counts_to_tensor(gex_train).to(device)
-    x_test = counts_to_tensor(gex_test).to(device)
+    x_train = torch.from_numpy(gex_train).to(device)
+    x_test = torch.from_numpy(gex_test).to(device)
 
-    y_train = counts_to_tensor(adx_train).to(device)
-    y_test = counts_to_tensor(adx_test).to(device)
+    y_train = torch.from_numpy(adx_train).to(device)
+    y_test = torch.from_numpy(adx_test).to(device)
 
 
     # Create TensorDataset and DataLoader
@@ -108,7 +110,7 @@ def main():
     """
     TODO:
     1. Make the models better, manually
-    3. Normalize the OG data via best-practices related to cite-seq!
+    3. Normalize the protein data via best-practices!
     """
 
     # Training 
@@ -153,7 +155,7 @@ def main():
     plt.plot(range(1, num_epochs + 1), train_mse_vals, label='MSE Training Vals')
     plt.xlabel('Epoch')
     plt.ylabel('Mean Squared Error')
-    plt.title(f'{args.model} MSE During Training')
+    plt.title(f'{args.desc}: MSE During Training')
     plt.legend()
     plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
     plt.show()
