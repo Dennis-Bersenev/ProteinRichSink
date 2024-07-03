@@ -19,11 +19,24 @@ def main():
     adata.var_names_make_unique()
     adata.layers["counts"] = adata.X.copy()
     sc.pp.filter_genes(adata, min_counts=10) # number of times that RNA is present in the dataset
-    sc.pp.filter_cells(adata, min_counts=100) # number of rna molecules in each cell
+    sc.pp.filter_cells(adata, min_counts=100) # number of biomolecules in each cell
 
     protein = adata[:, adata.var["feature_types"] == "Antibody Capture"].copy()
     rna = adata[:, adata.var["feature_types"] == "Gene Expression"].copy()
+    # Filtering cells not expressing both types of biomolecules
+    sc.pp.filter_cells(rna, min_counts=1)
+    sc.pp.filter_cells(protein, min_counts=1)
+    common_cells = protein.obs_names.intersection(rna.obs_names)
+    protein = protein[common_cells, :]
+    rna = rna[common_cells, :]
     
+    # Doing normalization and SVD steps
+    # sc.pp.normalize_total(rna)
+    sc.pp.log1p(adata)
+    rna.X = zscore_normalization(adata.X)
+
+    print(rna)
+    return
     # 80/20 split rule
     split = math.ceil(adata.n_vars * 0.8)
     gex_train = rna[:split, :].copy()
@@ -39,7 +52,8 @@ def main():
     
     ################################################### ML Training ###################################################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+    print(device)
+    
     # Parsing model from command line
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, required=True, help='ffnn, vae, todo')
