@@ -28,7 +28,7 @@ class Encoder(nn.Module):
     def forward(self, x):
         h = torch.relu(self.fc1(x))
         mu = self.fc2_mu(h)
-        logvar = self.fc2_logvar(h)
+        logvar = self.fc2_logvar(h).clamp(min=-20, max=20)  # Clamping for numerical stability
         return mu, logvar
 
 class Decoder(nn.Module):
@@ -56,3 +56,9 @@ class CVAE(nn.Module):
         mu, logvar = self.encoder(x)
         z = self.reparameterize(mu, logvar)
         return self.decoder(z), mu, logvar
+
+    def loss(self, recon_y, y, mu, logvar):
+        BCE = nn.functional.mse_loss(recon_y, y, reduction='sum')
+        KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        return BCE + KLD
+    
