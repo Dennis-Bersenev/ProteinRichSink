@@ -94,7 +94,6 @@ def main():
     """
     TODO:
     1. Make the models better, manually
-    2. Plot the train & test accuracy to visualize performance.
     3. Normalize the OG data via best-practices related to cite-seq!
     """
 
