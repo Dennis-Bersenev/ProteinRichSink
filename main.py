@@ -4,7 +4,7 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from utils import * 
-from models import FFNN, VAE, MLP
+from models import VAE, MLP
 import torch.nn as nn
 import torch.optim as optim
 import argparse
@@ -33,19 +33,19 @@ def main():
     rna = rna[common_cells, :]
     
     # RNA Normalization (NOTE: the dimensionality reduction here is an important choice! This version uses a VAE to get reduced GEX data)
-    sc.pp.log1p(rna)
-    rna_model = VAE(adata.n_obs, 300)
-    rna_optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    # sc.pp.log1p(rna)
+    rna_model = VAE(adata.n_vars, 300)
+    rna_optimizer = optim.Adam(rna_model.parameters(), lr=1e-3)
     rna_reconstruction_loss_fn = nn.MSELoss(reduction='sum')
     
     # Train the model
-    train_vae(model=rna_model, adata=adata, epochs=50, optimizer=rna_optimizer, reconstruction_loss_fn=rna_reconstruction_loss_fn)
+    expression_tensor = torch.from_numpy(adata.X.toarray())
+    train_vae(model=rna_model, data=expression_tensor, epochs=50, optimizer=rna_optimizer, reconstruction_loss_fn=rna_reconstruction_loss_fn)
 
     # Get the compressed representation of the data
-    model.eval()
+    rna_model.eval()
     with torch.no_grad():
-        data = torch.tensor(data, dtype=torch.float32)
-        mu, _ = model.encode(data)
+        mu, _ = rna_model.encode(data)
         rna_norm = mu.numpy()
         print(rna_norm.shape)  # Should be (80773, 300)
          
@@ -103,24 +103,7 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-
-    # 1) FFNN
-    if args.model == 'ffnn':
-        model = FFNN()
-    
-    # 2 VAE
-    elif args.model == 'vae': 
-        model = VAE()
-    
-    # 3 MLP
-    elif args.model == 'mlp': 
-        model = MLP(input_size, output_size).to(device)
-    
-    else:
-        print("Testing")
-        # for batch_X, batch_y in train_loader:
-        #     print(batch_X, batch_y)
-        return
+    model = MLP(input_size, output_size).to(device)
     
 
     criterion = nn.MSELoss()
