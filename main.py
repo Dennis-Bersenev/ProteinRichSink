@@ -33,6 +33,7 @@ def main():
     rna = rna[common_cells, :]
     
     # Doing normalization and SVD steps
+    # TODO: this is really the area where to change things up!
     sc.pp.log1p(rna)
     rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
     muon.prot.pp.clr(protein)
@@ -56,7 +57,8 @@ def main():
     
     # Parsing model from command line
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='ffnn, vae, todo')
+    # NOTE: all will probably use the model, but with modified RNA dimensionality reduction
+    parser.add_argument('--model', type=str, required=True, help='todo')
     parser.add_argument('--desc', type=str, required=True, help='describe the experiment')
     args = parser.parse_args()
     
@@ -109,8 +111,7 @@ def main():
     """
     TODO:
     0. Make another file for re-running existing models! And add some code to save the stats
-    1. Make the models better, manually
-    2. Add the Sinkhorn layers!
+    1. Add the Sinkhorn layers!
     """
 
     # Training 
