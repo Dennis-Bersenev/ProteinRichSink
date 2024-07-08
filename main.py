@@ -32,13 +32,31 @@ def main():
     protein = protein[common_cells, :]
     rna = rna[common_cells, :]
     
-    # Doing normalization and SVD steps
-    # TODO: this is really the area where to change things up!
+    # RNA Normalization (NOTE: the dimensionality reduction here is an important choice! This version uses a VAE to get reduced GEX data)
     sc.pp.log1p(rna)
-    rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    rna_model = VAE(adata.n_obs, 300)
+    rna_optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    rna_reconstruction_loss_fn = nn.MSELoss(reduction='sum')
+    
+    # Train the model
+    train_vae(model=rna_model, adata=adata, epochs=50, optimizer=rna_optimizer, reconstruction_loss_fn=rna_reconstruction_loss_fn)
+
+    # Get the compressed representation of the data
+    model.eval()
+    with torch.no_grad():
+        data = torch.tensor(data, dtype=torch.float32)
+        mu, _ = model.encode(data)
+        rna_norm = mu.numpy()
+        print(rna_norm.shape)  # Should be (80773, 300)
+         
+    
+    # Protein Normalization Step
     muon.prot.pp.clr(protein)
     protein_norm = protein.X.toarray()
     
+
+
+
     # 80/20 split rule
     split = math.ceil(rna_norm.shape[0] * 0.8)
     gex_train = rna_norm[:split, :]
@@ -110,8 +128,8 @@ def main():
 
     """
     TODO:
-    0. Make another file for re-running existing models! And add some code to save the stats
-    1. Add the Sinkhorn layers!
+    1. Debug and test the VAE approach.
+    2. Add the Sinkhorn layers!
     """
 
     # Training 
@@ -151,9 +169,9 @@ def main():
     test_loss /= len(test_loader.dataset)
     print(f'Test Loss: {test_loss:.4f}')
 
-    # NOTE: author eval metric
+    # NOTE: original author eval metric
     y_pred = model(x_test)
-    evaluate(y_pred, y_test, verbose=True)
+    rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_test, verbose=True)
     
     
     # Plotting the MSE over epochs
@@ -165,6 +183,21 @@ def main():
     plt.legend()
     plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
     plt.show()
+
+    # Saving statistics to text file
+    stat1 = f'Train Loss: {train_loss:.4f}'
+    stat2 = f'Test Loss: {test_loss:.4f}'
+    stat3 = f"RMSE: {rmse}"
+    stat4 = f"Pearson correlation: {pearson_corr}"
+    stat5 = f"Spearman correlation: {spearman_corr}"
+    stats = "\n".join([stat1, stat2, stat3, stat4, stat5])
+
+    # Specify the filename
+    filename = "./results/stats.txt"
+
+    # Write the strings to the file
+    with open(filename, "w") as file:
+        file.write(stats)
     
 
 
