@@ -74,3 +74,58 @@ class MLP(nn.Module):
         x = torch.relu(self.bn5(self.fc5(x)))
         x = self.fc6(x)
         return x
+    
+
+
+
+class CVAE(nn.Module):
+    def __init__(self, input_dim, latent_dim, n_classes, hidden_dim):
+        super(CVAE, self).__init__()
+        
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim + n_classes, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, latent_dim * 2)  # for mean and logvar
+        )
+        
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim + n_classes, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, input_dim),
+            nn.Sigmoid()
+        )
+    
+    def encode(self, x, y):
+        x = torch.cat([x, y], dim=1)
+        h = self.encoder(x)
+        mu, logvar = h[:, :self.latent_dim], h[:, self.latent_dim:]
+        return mu, logvar
+    
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+    
+    def decode(self, z, y):
+        z = torch.cat([z, y], dim=1)
+        return self.decoder(z)
+    
+    def forward(self, x, y):
+        mu, logvar = self.encode(x, y)
+        z = self.reparameterize(mu, logvar)
+        recon_x = self.decode(z, y)
+        return recon_x, mu, logvar

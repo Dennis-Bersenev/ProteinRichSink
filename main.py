@@ -4,7 +4,7 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from utils import * 
-from models import VAE, MLP
+from models import VAE, MLP, CVAE
 import torch.nn as nn
 import torch.optim as optim
 import argparse
@@ -42,23 +42,11 @@ def main():
     protein = protein[common_cells, :]
     rna = rna[common_cells, :]
     
-    # RNA Normalization (NOTE: the dimensionality reduction here is an important choice! This version uses a VAE to get reduced GEX data)
+    # RNA Normalization
     sc.pp.log1p(rna)
-    rna_model = VAE(rna.n_vars, 300)
-    rna_optimizer = optim.Adam(rna_model.parameters(), lr=1e-3)
-
-    # Train the model
-    expression_tensor = torch.from_numpy(rna.X.toarray())
-    train_vae(model=rna_model, data=expression_tensor, epochs=args.epochs, optimizer=rna_optimizer)
-
-    # Get the compressed representation of the data
-    rna_model.eval()
-    with torch.no_grad():
-        mu, _ = rna_model.encode(expression_tensor)
-        rna_norm = mu.numpy()  
-         
+    rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
     
-    # Protein Normalization Step
+    # Protein Normalization 
     muon.prot.pp.clr(protein)
     protein_norm = protein.X.toarray()
     
@@ -112,12 +100,7 @@ def main():
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    """
-    TODO:
-    1. Tune the VAE approach.
-    2. Add the Sinkhorn layers!
-    """
-
+    
     # Training 
     train_mse_vals = []
     best_train_loss = float("inf")
@@ -186,6 +169,13 @@ def main():
         file.write(stats)
     
 
+
+"""
+TODO:
+1. Tune the VAE approach.
+2. Add evals across protein types to see which proteins have the best/worst scores 
+3. Add the Sinkhorn layers!
+"""
 
 if __name__ == "__main__":
     main()
