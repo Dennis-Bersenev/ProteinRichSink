@@ -1,0 +1,1 @@
+This branch contains the standard prediction approach utilizing MLPs. The reduced dimensionality RNA-seq data given as input is obtained using the same approach as the winning authors from the 2021 NeurIPS challenge, namely, SVD.  
