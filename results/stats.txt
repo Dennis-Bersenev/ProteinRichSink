@@ -1,5 +1,5 @@
-Epoch 100/100, Train Loss: 0.1203
-Test Loss: 0.1853
-RMSE: 0.43047940731048584
-Pearson correlation: 0.8519962725235172
-Spearman correlation: 0.7519085552902466
+Train Loss: 0.2476
+Test Loss: 0.2399
+RMSE: 0.4897957742214203
+Pearson correlation: 0.8218274338134418
+Spearman correlation: 0.7181055847892022

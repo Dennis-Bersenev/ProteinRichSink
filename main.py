@@ -33,21 +33,19 @@ def main():
     rna = rna[common_cells, :]
     
     # RNA Normalization (NOTE: the dimensionality reduction here is an important choice! This version uses a VAE to get reduced GEX data)
-    # sc.pp.log1p(rna)
-    rna_model = VAE(adata.n_vars, 300)
+    sc.pp.log1p(rna)
+    rna_model = VAE(rna.n_vars, 300)
     rna_optimizer = optim.Adam(rna_model.parameters(), lr=1e-3)
-    rna_reconstruction_loss_fn = nn.MSELoss(reduction='sum')
-    
+
     # Train the model
-    expression_tensor = torch.from_numpy(adata.X.toarray())
-    train_vae(model=rna_model, data=expression_tensor, epochs=50, optimizer=rna_optimizer, reconstruction_loss_fn=rna_reconstruction_loss_fn)
+    expression_tensor = torch.from_numpy(rna.X.toarray())
+    train_vae(model=rna_model, data=expression_tensor, epochs=100, optimizer=rna_optimizer)
 
     # Get the compressed representation of the data
     rna_model.eval()
     with torch.no_grad():
-        mu, _ = rna_model.encode(data)
-        rna_norm = mu.numpy()
-        print(rna_norm.shape)  # Should be (80773, 300)
+        mu, _ = rna_model.encode(expression_tensor)
+        rna_norm = mu.numpy()  
          
     
     # Protein Normalization Step
@@ -64,10 +62,13 @@ def main():
 
     adx_train = protein_norm[:split, :]
     adx_test = protein_norm[split:, :]
-    # print(rna_norm.shape)
-    # print(protein_norm.shape)
-    # print(gex_train.shape)
-    # print(adx_train.shape)
+    print(f'Normalized RNA array shape: {rna_norm.shape}')
+    print(f'Normalized Protein array shape: {protein_norm.shape}')
+    print(f'Original RNA shape: {rna.X.shape}')
+    print(f'Original Protein shape: {protein.X.shape}')
+    print(f'Gex train shape: {gex_train.shape}')
+    print(f'Gex test shape: {gex_test.shape}')
+    
     
     ################################################### ML Training ###################################################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -111,7 +112,7 @@ def main():
 
     """
     TODO:
-    1. Debug and test the VAE approach.
+    1. Tune the VAE approach.
     2. Add the Sinkhorn layers!
     """
 
@@ -165,7 +166,7 @@ def main():
     plt.title(f'{args.desc}: MSE During Training')
     plt.legend()
     plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
-    plt.show()
+    # plt.show()
 
     # Saving statistics to text file
     stat1 = f'Train Loss: {train_loss:.4f}'
