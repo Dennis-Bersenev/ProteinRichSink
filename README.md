@@ -1,0 +1,1 @@
+This branch contains the standard prediction approach utilizing MLPs. The reduced dimensionality RNA-seq data given as input is obtained by first training a VAE on the GEX data, and then sampling from its latent distribution.  
