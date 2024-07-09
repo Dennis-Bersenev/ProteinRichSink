@@ -14,6 +14,16 @@ import muon
 
 
 def main():
+
+    ################################################### Arg Parsing #####################################################
+    # Parsing model from command line
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, required=True, help='ffnn or cvae')
+    parser.add_argument('--desc', type=str, required=True, help='describe the experiment for bookkeeping')
+    parser.add_argument('--epochs', type=int, required=True, help='how many epochs do you want all neural nets to use?')
+    args = parser.parse_args()
+    
+
     ################################################### Data Prep #####################################################
     data = "data/pbmc_10k_protein_v3_raw_feature_bc_matrix.h5"
     adata = sc.read_10x_h5(data, genome=None, gex_only=False, backup_url=None)
@@ -39,7 +49,7 @@ def main():
 
     # Train the model
     expression_tensor = torch.from_numpy(rna.X.toarray())
-    train_vae(model=rna_model, data=expression_tensor, epochs=100, optimizer=rna_optimizer)
+    train_vae(model=rna_model, data=expression_tensor, epochs=args.epochs, optimizer=rna_optimizer)
 
     # Get the compressed representation of the data
     rna_model.eval()
@@ -74,13 +84,6 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
     
-    # Parsing model from command line
-    parser = argparse.ArgumentParser()
-    # NOTE: all will probably use the model, but with modified RNA dimensionality reduction
-    parser.add_argument('--model', type=str, required=True, help='todo')
-    parser.add_argument('--desc', type=str, required=True, help='describe the experiment')
-    args = parser.parse_args()
-    
 
     # Hyperparameters
     input_size = rna_norm.shape[1]          # Number of unique rna molecules
@@ -88,7 +91,6 @@ def main():
     output_size = protein_norm.shape[1]     # Number of unique proteins
     latent_size = 64                        # For VAEs
     learning_rate = 0.001
-    num_epochs = 100
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
@@ -119,7 +121,7 @@ def main():
     # Training 
     train_mse_vals = []
     best_train_loss = float("inf")
-    for epoch in range(num_epochs):
+    for epoch in range(args.epochs):
         model.train()
         train_loss = 0.0
         for X_batch, Y_batch in train_loader:
@@ -134,7 +136,7 @@ def main():
         
         train_mse_vals.append(train_loss)
         
-        print(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}')
+        print(f'Epoch {epoch+1}/{args.epochs}, Train Loss: {train_loss:.4f}')
         
         if train_loss < best_train_loss:
             best_train_loss = train_loss
@@ -160,7 +162,7 @@ def main():
     
     # Plotting the MSE over epochs
     plt.figure(figsize=(10, 5))
-    plt.plot(range(1, num_epochs + 1), train_mse_vals, label='MSE Training Vals')
+    plt.plot(range(1, args.epochs + 1), train_mse_vals, label='MSE Training Vals')
     plt.xlabel('Epoch')
     plt.ylabel('Mean Squared Error')
     plt.title(f'{args.desc}: MSE During Training')
