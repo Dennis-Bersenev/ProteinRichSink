@@ -4,7 +4,7 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from utils import * 
-from models import FFNN, VAE, MLP
+from models import VAE, MLP
 import torch.nn as nn
 import torch.optim as optim
 import argparse
@@ -32,12 +32,29 @@ def main():
     protein = protein[common_cells, :]
     rna = rna[common_cells, :]
     
-    # Doing normalization and SVD steps
+    # RNA Normalization (NOTE: the dimensionality reduction here is an important choice! This version uses a VAE to get reduced GEX data)
     sc.pp.log1p(rna)
-    rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    rna_model = VAE(rna.n_vars, 300)
+    rna_optimizer = optim.Adam(rna_model.parameters(), lr=1e-3)
+
+    # Train the model
+    expression_tensor = torch.from_numpy(rna.X.toarray())
+    train_vae(model=rna_model, data=expression_tensor, epochs=100, optimizer=rna_optimizer)
+
+    # Get the compressed representation of the data
+    rna_model.eval()
+    with torch.no_grad():
+        mu, _ = rna_model.encode(expression_tensor)
+        rna_norm = mu.numpy()  
+         
+    
+    # Protein Normalization Step
     muon.prot.pp.clr(protein)
     protein_norm = protein.X.toarray()
     
+
+
+
     # 80/20 split rule
     split = math.ceil(rna_norm.shape[0] * 0.8)
     gex_train = rna_norm[:split, :]
@@ -45,10 +62,13 @@ def main():
 
     adx_train = protein_norm[:split, :]
     adx_test = protein_norm[split:, :]
-    # print(rna_norm.shape)
-    # print(protein_norm.shape)
-    # print(gex_train.shape)
-    # print(adx_train.shape)
+    print(f'Normalized RNA array shape: {rna_norm.shape}')
+    print(f'Normalized Protein array shape: {protein_norm.shape}')
+    print(f'Original RNA shape: {rna.X.shape}')
+    print(f'Original Protein shape: {protein.X.shape}')
+    print(f'Gex train shape: {gex_train.shape}')
+    print(f'Gex test shape: {gex_test.shape}')
+    
     
     ################################################### ML Training ###################################################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -56,7 +76,8 @@ def main():
     
     # Parsing model from command line
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='ffnn, vae, todo')
+    # NOTE: all will probably use the model, but with modified RNA dimensionality reduction
+    parser.add_argument('--model', type=str, required=True, help='todo')
     parser.add_argument('--desc', type=str, required=True, help='describe the experiment')
     args = parser.parse_args()
     
@@ -83,24 +104,7 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-
-    # 1) FFNN
-    if args.model == 'ffnn':
-        model = FFNN()
-    
-    # 2 VAE
-    elif args.model == 'vae': 
-        model = VAE()
-    
-    # 3 MLP
-    elif args.model == 'mlp': 
-        model = MLP(input_size, output_size).to(device)
-    
-    else:
-        print("Testing")
-        # for batch_X, batch_y in train_loader:
-        #     print(batch_X, batch_y)
-        return
+    model = MLP(input_size, output_size).to(device)
     
 
     criterion = nn.MSELoss()
@@ -108,8 +112,7 @@ def main():
 
     """
     TODO:
-    0. Make another file for re-running existing models! And add some code to save the stats
-    1. Make the models better, manually
+    1. Tune the VAE approach.
     2. Add the Sinkhorn layers!
     """
 
@@ -150,9 +153,9 @@ def main():
     test_loss /= len(test_loader.dataset)
     print(f'Test Loss: {test_loss:.4f}')
 
-    # NOTE: author eval metric
+    # NOTE: original author eval metric
     y_pred = model(x_test)
-    evaluate(y_pred, y_test, verbose=True)
+    rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_test, verbose=True)
     
     
     # Plotting the MSE over epochs
@@ -163,7 +166,22 @@ def main():
     plt.title(f'{args.desc}: MSE During Training')
     plt.legend()
     plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
-    plt.show()
+    # plt.show()
+
+    # Saving statistics to text file
+    stat1 = f'Train Loss: {train_loss:.4f}'
+    stat2 = f'Test Loss: {test_loss:.4f}'
+    stat3 = f"RMSE: {rmse}"
+    stat4 = f"Pearson correlation: {pearson_corr}"
+    stat5 = f"Spearman correlation: {spearman_corr}"
+    stats = "\n".join([stat1, stat2, stat3, stat4, stat5])
+
+    # Specify the filename
+    filename = "./results/stats.txt"
+
+    # Write the strings to the file
+    with open(filename, "w") as file:
+        file.write(stats)
     
 
 

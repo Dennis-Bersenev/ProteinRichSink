@@ -3,8 +3,8 @@ import torch
 import numpy as np
 from sklearn.decomposition import TruncatedSVD
 from torchmetrics.functional import mean_squared_error, pearson_corrcoef, spearman_corrcoef
-
-
+from torch.utils.data import TensorDataset, DataLoader
+import torch.nn as nn
 
 # Convert the counts etc to PyTorch tensors
 def counts_to_tensor(data: ad.AnnData):
@@ -49,3 +49,45 @@ def evaluate(y_pred, y_test, verbose=True):
         print("Spearman correlation:", spearman_corr)
         
     return rmse, pearson_corr, spearman_corr
+
+
+####### Training a VAE #######
+def vae_loss(recon_x, x, mu, logvar):
+    # Reconstruction loss (e.g., MSE)
+    recon_loss = nn.functional.mse_loss(recon_x, x, reduction='sum')
+    
+    # KL divergence loss
+    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    
+    return recon_loss + kl_loss, recon_loss, kl_loss
+
+
+
+def train_vae(model, data, epochs, optimizer):
+    
+    # Define the dataset and dataloader
+
+    dataset = TensorDataset(data, data)
+
+    dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
+
+    model.train()
+    for epoch in range(epochs):
+        train_loss = 0
+        recon_loss_total = 0
+        kl_loss_total = 0
+        for batch_idx, (data, _) in enumerate(dataloader):
+            optimizer.zero_grad()
+            recon_batch, mu, logvar = model(data)
+            loss, recon_loss, kl_loss = vae_loss(recon_batch, data, mu, logvar)
+            loss.backward()
+            train_loss += loss.item()
+            recon_loss_total += recon_loss.item()
+            kl_loss_total += kl_loss.item()
+            optimizer.step()
+        
+        avg_train_loss = train_loss / len(dataloader.dataset)
+        avg_recon_loss = recon_loss_total / len(dataloader.dataset)
+        avg_kl_loss = kl_loss_total / len(dataloader.dataset)
+        
+        print(f'Epoch {epoch + 1}, Total Loss: {avg_train_loss:.4f}, Reconstruction Loss: {avg_recon_loss:.4f}, KL Loss: {avg_kl_loss:.4f}')
