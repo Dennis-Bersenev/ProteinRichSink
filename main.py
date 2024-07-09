@@ -12,6 +12,18 @@ import math
 import matplotlib.pyplot as plt
 import muon 
 
+def cvae_loss(recon_x, x, mu, logvar, input_dim):
+    # Ensure recon_x and x are in the correct shape and range
+    recon_x = torch.clamp(recon_x, min=1e-7, max=1-1e-7)  # Clamp to avoid log(0)
+    x = x.view(-1, input_dim)
+    
+    # Check tensor shapes
+    assert recon_x.shape == x.shape, f"Shape mismatch: recon_x shape {recon_x.shape}, x shape {x.shape}"
+
+    BCE = F.binary_cross_entropy(recon_x, x, reduction='sum')
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return BCE + KLD
+
 
 def main():
 
@@ -64,9 +76,6 @@ def main():
     print(f'Normalized Protein array shape: {protein_norm.shape}')
     print(f'Original RNA shape: {rna.X.shape}')
     print(f'Original Protein shape: {protein.X.shape}')
-    print(f'Gex train shape: {gex_train.shape}')
-    print(f'Gex test shape: {gex_test.shape}')
-    
     
     ################################################### ML Training ###################################################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -75,10 +84,13 @@ def main():
 
     # Hyperparameters
     input_size = rna_norm.shape[1]          # Number of unique rna molecules
-    hidden_size = 512                       # Hyper-parameter
     output_size = protein_norm.shape[1]     # Number of unique proteins
-    latent_size = 64                        # For VAEs
+    latent_size = output_size               # For VAEs: you choose, doesn't theoretically matter
+    conditional_size = output_size          # For CVAEs: based on protein dataset shape
     learning_rate = 0.001
+    hidden_dims = [1024, 512, 256, 128]  
+
+    # print(f'IN: {input_size}, latent: {output_size}, conditional: {conditional_size}')
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
@@ -91,66 +103,82 @@ def main():
     train_dataset = TensorDataset(x_train, y_train)
     test_dataset = TensorDataset(x_test, y_test)
 
+    # Some debugging checks
+    print(f'train GEX shape: {x_train.shape}')
+    print(f'test GEX  shape: {x_test.shape}')
+    
+    print(f'train ADX shape: {y_train.shape}')
+    print(f'test ADX shape: {y_test.shape}')
+    
+
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-    model = MLP(input_size, output_size).to(device)
     
-
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-
+    model = CVAE(input_dim=input_size, latent_dim=latent_size, cond_dim=conditional_size, hidden_dims=hidden_dims).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
     
-    # Training 
-    train_mse_vals = []
-    best_train_loss = float("inf")
+    train_loss_arr = []
+    
     for epoch in range(args.epochs):
         model.train()
-        train_loss = 0.0
-        for X_batch, Y_batch in train_loader:
+        train_loss = 0
+        for batch_idx, (data, target) in enumerate(train_loader):  # Assuming data is input and target is the 17-dimensional vector
+            data, target = data.to(device), target.to(device)
+            
             optimizer.zero_grad()
-            outputs = model(X_batch)
-            loss = criterion(outputs, Y_batch)
+            
+            recon_batch, mu, logvar = model(data, target)
+            
+            # Debugging checks
+            if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
+                print(f"recon_batch values out of range at batch {batch_idx}")
+            
+            loss = cvae_loss(recon_batch, data, mu, logvar)
             loss.backward()
+            train_loss += loss.item()
             optimizer.step()
-            train_loss += loss.item() * X_batch.size(0)
         
-        train_loss /= len(train_loader.dataset)
-        
-        train_mse_vals.append(train_loss)
-        
-        print(f'Epoch {epoch+1}/{args.epochs}, Train Loss: {train_loss:.4f}')
-        
-        if train_loss < best_train_loss:
-            best_train_loss = train_loss
-            torch.save(model.state_dict(), f'./models/{args.model}.pth')
-    
+        print(f'Epoch {epoch + 1}, Loss: {train_loss / len(train_loader.dataset)}')
 
-    # Evals
+        train_loss_arr.append(train_loss / len(train_loader.dataset))
+    # TODO: debug & test!
+    return
+    ################################################### Evals ###################################################
     # Final evaluation on test set
     model.eval()  # Set the model to evaluation mode
-    test_loss = 0.0
-    with torch.no_grad():  # Disable gradient computation for evaluation
-        for X_batch, Y_batch in test_loader:
-            outputs = model(X_batch)
-            loss = criterion(outputs, Y_batch)
-            test_loss += loss.item() * X_batch.size(0)
+    test_loss = 0
+    
+    with torch.no_grad():  # No need to compute gradients for testing
+        for batch_idx, (data, target) in enumerate(test_loader):  # Assuming data is input and target is the 17-dimensional vector
+            data, target = data.to(device), target.to(device)
+            
+            recon_batch, mu, logvar = model(data, target)
+            
+            # Debugging checks
+            if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
+                print(f"recon_batch values out of range at batch {batch_idx}")
+            
+            loss = loss_function(recon_batch, data, mu, logvar)
+            test_loss += loss.item()
+    
     test_loss /= len(test_loader.dataset)
-    print(f'Test Loss: {test_loss:.4f}')
+    print(f'Test Loss: {test_loss}')
+
 
     # NOTE: original author eval metric
     y_pred = model(x_test)
     rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_test, verbose=True)
     
     
-    # Plotting the MSE over epochs
+    # Plotting the loss over epochs
     plt.figure(figsize=(10, 5))
-    plt.plot(range(1, args.epochs + 1), train_mse_vals, label='MSE Training Vals')
+    plt.plot(range(1, args.epochs + 1), train_loss_arr, label='Training Loss')
     plt.xlabel('Epoch')
-    plt.ylabel('Mean Squared Error')
-    plt.title(f'{args.desc}: MSE During Training')
+    plt.ylabel('Loss')
+    plt.title(f'{args.desc}: Loss During Training')
     plt.legend()
-    plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
+    plt.savefig(f'./results/{args.model}_loss_training_plot.png')  # Save the plot as a PNG file
     # plt.show()
 
     # Saving statistics to text file

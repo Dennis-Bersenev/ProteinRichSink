@@ -5,6 +5,7 @@ from sklearn.decomposition import TruncatedSVD
 from torchmetrics.functional import mean_squared_error, pearson_corrcoef, spearman_corrcoef
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
+import torch.nn.functional as F
 
 # Convert the counts etc to PyTorch tensors
 def counts_to_tensor(data: ad.AnnData):
@@ -60,7 +61,6 @@ def vae_loss(recon_x, x, mu, logvar):
     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     
     return recon_loss + kl_loss, recon_loss, kl_loss
-
 
 
 def train_vae(model, data, epochs, optimizer):
