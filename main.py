@@ -1,7 +1,7 @@
 import scanpy as sc
 import torch
 import anndata as ad
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, random_split
 import numpy as np
 from utils import * 
 from models import VAE, MLP, CVAE
@@ -31,7 +31,7 @@ def main():
     adata.var_names_make_unique()
     adata.layers["counts"] = adata.X.copy()
     sc.pp.filter_genes(adata, min_counts=100) # number of times that RNA is present in the dataset
-    sc.pp.filter_cells(adata, min_counts=500) # number of biomolecules in each cell
+    sc.pp.filter_cells(adata, min_counts=100) # number of biomolecules in each cell
 
     protein = adata[:, adata.var["feature_types"] == "Antibody Capture"].copy()
     rna = adata[:, adata.var["feature_types"] == "Gene Expression"].copy()
@@ -44,8 +44,8 @@ def main():
     
     # RNA Normalization
     sc.pp.log1p(rna)
-    rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
-    # rna_norm = rna.X.toarray() # If skipping zscore step
+    # rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    rna_norm = zscore_normalization(rna.X.toarray()) # If skipping dim reduction step
     
     
     # Protein Normalization 
@@ -57,11 +57,14 @@ def main():
 
     # 80/20 split rule
     split = math.ceil(rna_norm.shape[0] * 0.8)
+    validation_split = math.ceil(rna_norm.shape[0] * 0.95)
     gex_train = rna_norm[:split, :]
-    gex_test = rna_norm[split:, :]
+    gex_test = rna_norm[split:validation_split, :]
+    gex_valid =  rna_norm[validation_split:, :]
 
     adx_train = protein_norm[:split, :]
-    adx_test = protein_norm[split:, :]
+    adx_test = protein_norm[split:validation_split, :]
+    adx_valid = protein_norm[validation_split:, :]
     print(f'Normalized RNA array shape: {rna_norm.shape}')
     print(f'Normalized Protein array shape: {protein_norm.shape}')
     print(f'Original RNA shape: {rna.X.shape}')
@@ -78,17 +81,18 @@ def main():
     latent_size = output_size               # For VAEs: you choose, doesn't theoretically matter
     conditional_size = output_size          # For CVAEs: based on protein dataset shape
     learning_rate = 0.001
-    c = 2 # scaling factor
+    c = 1 # scaling factor
     hidden_dims = [c*1024, c*512, c*256, c*128]  
 
     # print(f'IN: {input_size}, latent: {output_size}, conditional: {conditional_size}')
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
+    x_valid = torch.from_numpy(gex_valid)
 
     y_train = torch.from_numpy(adx_train).to(device)
     y_test = torch.from_numpy(adx_test).to(device)
-
+    y_valid = torch.from_numpy(adx_valid)
 
     # Create TensorDataset and DataLoader
     train_dataset = TensorDataset(x_train, y_train)
@@ -102,9 +106,8 @@ def main():
     print(f'test ADX shape: {y_test.shape}')
     
 
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
-
     
     model = CVAE(input_dim=input_size, latent_dim=latent_size, cond_dim=conditional_size, hidden_dims=hidden_dims).to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
@@ -120,10 +123,7 @@ def main():
             optimizer.zero_grad()
             
             recon_batch, mu, logvar = model(data, target)
-            recon_batch = recon_batch.to(device)
-            mu = mu.to(device)
-            logvar = logvar.to(device)
-                
+            
             # Debugging checks
             if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
                 print(f"recon_batch values out of range at batch {batch_idx}")
@@ -147,10 +147,6 @@ def main():
             data, target = data.to(device), target.to(device)
             
             recon_batch, mu, logvar = model(data, target)
-            
-            recon_batch = recon_batch.to(device)
-            mu = mu.to(device)
-            logvar = logvar.to(device)
 
             # Debugging checks
             if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
@@ -164,8 +160,8 @@ def main():
 
 
     # NOTE: original author eval metric
-    y_pred = sample_from_latent(model, x_test, y_test, device=device)
-    rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_test, verbose=True)
+    y_pred = sample_from_latent(model, x_valid, y_valid, device=device)
+    rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_valid, verbose=True)
     
     
     # Plotting the loss over epochs

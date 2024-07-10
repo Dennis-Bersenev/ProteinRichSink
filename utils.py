@@ -25,6 +25,14 @@ def zscore_normalization_and_svd(X: np.ndarray, n_components):
     X_lowdim = svd.fit_transform(X_normalized)
     return X_lowdim
 
+def zscore_normalization(X: np.ndarray):
+    
+    
+    X_sd = np.std(X, axis=1).reshape(-1, 1)
+    X_sd[X_sd == 0] = 1
+    X_normalized = (X - np.mean(X, axis=1).reshape(-1, 1)) / X_sd
+    return X_normalized
+
 
 # Adapted from: https://github.com/DanHanh/scLinear/blob/main/inst/python/evaluate.py
 def evaluate(y_pred, y_test, verbose=True):
@@ -108,11 +116,7 @@ def sample_from_latent(model, data, condition, device):
         return z
 
 def cvae_loss(recon_x, x, mu, logvar, input_dim):
-    # Ensure recon_x and x are in the correct shape and range
-    
-    recon_x = torch.clamp(recon_x, min=1e-7, max=1-1e-7)  # Clamp to avoid log(0)
-    x = torch.clamp(x, min=1e-7, max=1-1e-7)
-    # x = x.view(-1, input_dim)
+    x = x.view(-1, input_dim)
     
     # Check tensor shapes
     assert recon_x.shape == x.shape, f"Shape mismatch: {recon_x.shape} vs {x.shape}"
