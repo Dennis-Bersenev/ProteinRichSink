@@ -52,7 +52,7 @@ def evaluate(y_pred, y_test, verbose=True):
     return rmse, pearson_corr, spearman_corr
 
 
-####### Training a VAE #######
+####### VAE Helpers #######
 def vae_loss(recon_x, x, mu, logvar):
     # Reconstruction loss (e.g., MSE)
     recon_loss = nn.functional.mse_loss(recon_x, x, reduction='sum')
@@ -91,3 +91,35 @@ def train_vae(model, data, epochs, optimizer):
         avg_kl_loss = kl_loss_total / len(dataloader.dataset)
         
         print(f'Epoch {epoch + 1}, Total Loss: {avg_train_loss:.4f}, Reconstruction Loss: {avg_recon_loss:.4f}, KL Loss: {avg_kl_loss:.4f}')
+
+
+def sample_from_latent(model, data, condition, device):
+    model.eval()  # Set the model to evaluation mode
+    with torch.no_grad():
+        # Move data to the appropriate device
+        data, condition = data.to(device), condition.to(device)
+        
+        # Encode the data to get the latent distribution parameters
+        mu, logvar = model.encode(data, condition)
+        
+        # Sample from the latent distribution
+        z = model.reparameterize(mu, logvar)
+        
+        return z
+
+def cvae_loss(recon_x, x, mu, logvar, input_dim):
+    # Ensure recon_x and x are in the correct shape and range
+    
+    recon_x = torch.clamp(recon_x, min=1e-7, max=1-1e-7)  # Clamp to avoid log(0)
+    x = torch.clamp(x, min=1e-7, max=1-1e-7)
+    # x = x.view(-1, input_dim)
+    
+    # Check tensor shapes
+    assert recon_x.shape == x.shape, f"Shape mismatch: {recon_x.shape} vs {x.shape}"
+    assert recon_x.min() >= 0 and recon_x.max() <= 1, "recon_batch values out of range [0, 1]"
+    assert x.min() >= 0 and x.max() <= 1, "data values out of range [0, 1]"
+
+    
+    BCE = F.binary_cross_entropy(recon_x, x, reduction='sum')
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return BCE + KLD

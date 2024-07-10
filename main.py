@@ -12,18 +12,6 @@ import math
 import matplotlib.pyplot as plt
 import muon 
 
-def cvae_loss(recon_x, x, mu, logvar, input_dim):
-    # Ensure recon_x and x are in the correct shape and range
-    recon_x = torch.clamp(recon_x, min=1e-7, max=1-1e-7)  # Clamp to avoid log(0)
-    x = x.view(-1, input_dim)
-    
-    # Check tensor shapes
-    assert recon_x.shape == x.shape, f"Shape mismatch: recon_x shape {recon_x.shape}, x shape {x.shape}"
-
-    BCE = F.binary_cross_entropy(recon_x, x, reduction='sum')
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    return BCE + KLD
-
 
 def main():
 
@@ -57,6 +45,8 @@ def main():
     # RNA Normalization
     sc.pp.log1p(rna)
     rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    # rna_norm = rna.X.toarray() # If skipping zscore step
+    
     
     # Protein Normalization 
     muon.prot.pp.clr(protein)
@@ -88,7 +78,8 @@ def main():
     latent_size = output_size               # For VAEs: you choose, doesn't theoretically matter
     conditional_size = output_size          # For CVAEs: based on protein dataset shape
     learning_rate = 0.001
-    hidden_dims = [1024, 512, 256, 128]  
+    c = 2 # scaling factor
+    hidden_dims = [c*1024, c*512, c*256, c*128]  
 
     # print(f'IN: {input_size}, latent: {output_size}, conditional: {conditional_size}')
 
@@ -123,18 +114,21 @@ def main():
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0
-        for batch_idx, (data, target) in enumerate(train_loader):  # Assuming data is input and target is the 17-dimensional vector
+        for batch_idx, (data, target) in enumerate(train_loader):  
             data, target = data.to(device), target.to(device)
-            
+        
             optimizer.zero_grad()
             
             recon_batch, mu, logvar = model(data, target)
-            
+            recon_batch = recon_batch.to(device)
+            mu = mu.to(device)
+            logvar = logvar.to(device)
+                
             # Debugging checks
             if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
                 print(f"recon_batch values out of range at batch {batch_idx}")
             
-            loss = cvae_loss(recon_batch, data, mu, logvar)
+            loss = cvae_loss(recon_batch, data, mu, logvar, input_size)
             loss.backward()
             train_loss += loss.item()
             optimizer.step()
@@ -142,24 +136,27 @@ def main():
         print(f'Epoch {epoch + 1}, Loss: {train_loss / len(train_loader.dataset)}')
 
         train_loss_arr.append(train_loss / len(train_loader.dataset))
-    # TODO: debug & test!
-    return
+    
     ################################################### Evals ###################################################
     # Final evaluation on test set
     model.eval()  # Set the model to evaluation mode
     test_loss = 0
     
-    with torch.no_grad():  # No need to compute gradients for testing
-        for batch_idx, (data, target) in enumerate(test_loader):  # Assuming data is input and target is the 17-dimensional vector
+    with torch.no_grad():  
+        for batch_idx, (data, target) in enumerate(test_loader):  
             data, target = data.to(device), target.to(device)
             
             recon_batch, mu, logvar = model(data, target)
             
+            recon_batch = recon_batch.to(device)
+            mu = mu.to(device)
+            logvar = logvar.to(device)
+
             # Debugging checks
             if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
                 print(f"recon_batch values out of range at batch {batch_idx}")
             
-            loss = loss_function(recon_batch, data, mu, logvar)
+            loss = cvae_loss(recon_batch, data, mu, logvar, input_size)
             test_loss += loss.item()
     
     test_loss /= len(test_loader.dataset)
@@ -167,7 +164,7 @@ def main():
 
 
     # NOTE: original author eval metric
-    y_pred = model(x_test)
+    y_pred = sample_from_latent(model, x_test, y_test, device=device)
     rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_test, verbose=True)
     
     
