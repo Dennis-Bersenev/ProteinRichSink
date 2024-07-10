@@ -1,5 +1,5 @@
-Train Loss: 0.2476
-Test Loss: 0.2399
-RMSE: 0.4897957742214203
-Pearson correlation: 0.8218274338134418
-Spearman correlation: 0.7181055847892022
+Train Loss: 203634953.8398
+Test Loss: 3229.3550
+RMSE: 1.3384684324264526
+Pearson correlation: 0.00545767841711175
+Spearman correlation: 0.0068975471279910635

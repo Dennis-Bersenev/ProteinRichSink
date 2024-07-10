@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+from torch.nn import functional as F
 
 class VAE(nn.Module):
     def __init__(self, input_dim, latent_dim):
@@ -74,3 +75,49 @@ class MLP(nn.Module):
         x = torch.relu(self.bn5(self.fc5(x)))
         x = self.fc6(x)
         return x
+    
+
+
+class CVAE(nn.Module):
+    def __init__(self, input_dim, latent_dim, cond_dim, hidden_dims):
+        super(CVAE, self).__init__()
+        
+        # Encoder layers
+        self.encoder_layers = nn.ModuleList()
+        in_dim = input_dim + cond_dim
+        for h_dim in hidden_dims:
+            self.encoder_layers.append(nn.Linear(in_dim, h_dim))
+            in_dim = h_dim
+        self.fc21 = nn.Linear(hidden_dims[-1], latent_dim)
+        self.fc22 = nn.Linear(hidden_dims[-1], latent_dim)
+        
+        # Decoder layers
+        self.decoder_layers = nn.ModuleList()
+        in_dim = latent_dim + cond_dim
+        for h_dim in reversed(hidden_dims):
+            self.decoder_layers.append(nn.Linear(in_dim, h_dim))
+            in_dim = h_dim
+        self.fc4 = nn.Linear(hidden_dims[0], input_dim)
+    
+    def encode(self, x, c):
+        xc = torch.cat((x, c), dim=1)
+        for layer in self.encoder_layers:
+            xc = F.relu(layer(xc))
+        return self.fc21(xc), self.fc22(xc)
+    
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+    
+    def decode(self, z, c):
+        zc = torch.cat((z, c), dim=1)
+        for layer in self.decoder_layers:
+            zc = F.relu(layer(zc))
+        return torch.sigmoid(self.fc4(zc))
+    
+    def forward(self, x, c):
+        mu, logvar = self.encode(x, c)
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z, c), mu, logvar
+

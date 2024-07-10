@@ -5,6 +5,7 @@ from sklearn.decomposition import TruncatedSVD
 from torchmetrics.functional import mean_squared_error, pearson_corrcoef, spearman_corrcoef
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
+import torch.nn.functional as F
 
 # Convert the counts etc to PyTorch tensors
 def counts_to_tensor(data: ad.AnnData):
@@ -23,6 +24,21 @@ def zscore_normalization_and_svd(X: np.ndarray, n_components):
     svd = TruncatedSVD(n_components=n_components)
     X_lowdim = svd.fit_transform(X_normalized)
     return X_lowdim
+
+def min_max_normalize(X: np.ndarray):
+    """
+    Normalize a numpy array to the range [0, 1] using min-max normalization.
+
+    Parameters:
+    array (np.ndarray): The numpy array to normalize.
+
+    Returns:
+    np.ndarray: The normalized numpy array.
+    """
+    min_val = np.min(X)
+    max_val = np.max(X)
+    normalized_array = (X - min_val) / (max_val - min_val)
+    return normalized_array
 
 
 # Adapted from: https://github.com/DanHanh/scLinear/blob/main/inst/python/evaluate.py
@@ -51,7 +67,7 @@ def evaluate(y_pred, y_test, verbose=True):
     return rmse, pearson_corr, spearman_corr
 
 
-####### Training a VAE #######
+####### VAE Helpers #######
 def vae_loss(recon_x, x, mu, logvar):
     # Reconstruction loss (e.g., MSE)
     recon_loss = nn.functional.mse_loss(recon_x, x, reduction='sum')
@@ -60,7 +76,6 @@ def vae_loss(recon_x, x, mu, logvar):
     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     
     return recon_loss + kl_loss, recon_loss, kl_loss
-
 
 
 def train_vae(model, data, epochs, optimizer):
@@ -91,3 +106,31 @@ def train_vae(model, data, epochs, optimizer):
         avg_kl_loss = kl_loss_total / len(dataloader.dataset)
         
         print(f'Epoch {epoch + 1}, Total Loss: {avg_train_loss:.4f}, Reconstruction Loss: {avg_recon_loss:.4f}, KL Loss: {avg_kl_loss:.4f}')
+
+
+def sample_from_latent(model, data, condition, device):
+    model.eval()  # Set the model to evaluation mode
+    with torch.no_grad():
+        # Move data to the appropriate device
+        data, condition = data.to(device), condition.to(device)
+        
+        # Encode the data to get the latent distribution parameters
+        mu, logvar = model.encode(data, condition)
+        
+        # Sample from the latent distribution
+        z = model.reparameterize(mu, logvar)
+        
+        return z
+
+def cvae_loss(recon_x, x, mu, logvar, input_dim):
+    x = x.view(-1, input_dim)
+    
+    # Check tensor shapes
+    assert recon_x.shape == x.shape, f"Shape mismatch: {recon_x.shape} vs {x.shape}"
+    assert recon_x.min() >= 0.0 and recon_x.max() <= 1.0, "recon_batch values out of range [0, 1]"
+    assert x.min() >= 0 and x.max() <= 1, "data values out of range [0, 1]"
+
+    
+    BCE = F.binary_cross_entropy(recon_x, x, reduction='sum')
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return BCE + KLD
