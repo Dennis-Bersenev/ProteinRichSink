@@ -120,6 +120,4 @@ class CVAE(nn.Module):
         mu, logvar = self.encode(x, c)
         z = self.reparameterize(mu, logvar)
         return self.decode(z, c), mu, logvar
-    
 
-    

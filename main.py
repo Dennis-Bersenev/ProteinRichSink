@@ -30,7 +30,7 @@ def main():
 
     adata.var_names_make_unique()
     adata.layers["counts"] = adata.X.copy()
-    sc.pp.filter_genes(adata, min_counts=100) # number of times that RNA is present in the dataset
+    sc.pp.filter_genes(adata, min_counts=50) # number of times that RNA is present in the dataset
     sc.pp.filter_cells(adata, min_counts=100) # number of biomolecules in each cell
 
     protein = adata[:, adata.var["feature_types"] == "Antibody Capture"].copy()
@@ -45,7 +45,7 @@ def main():
     # RNA Normalization
     sc.pp.log1p(rna)
     # rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
-    rna_norm = zscore_normalization(rna.X.toarray()) # If skipping dim reduction step
+    rna_norm = min_max_normalize(rna.X.toarray()) # If skipping dim reduction step
     
     
     # Protein Normalization 
@@ -81,18 +81,18 @@ def main():
     latent_size = output_size               # For VAEs: you choose, doesn't theoretically matter
     conditional_size = output_size          # For CVAEs: based on protein dataset shape
     learning_rate = 0.001
-    c = 1 # scaling factor
+    c = 3 # scaling factor
     hidden_dims = [c*1024, c*512, c*256, c*128]  
 
     # print(f'IN: {input_size}, latent: {output_size}, conditional: {conditional_size}')
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
-    x_valid = torch.from_numpy(gex_valid)
+    x_valid = torch.from_numpy(gex_valid).to(device)
 
     y_train = torch.from_numpy(adx_train).to(device)
     y_test = torch.from_numpy(adx_test).to(device)
-    y_valid = torch.from_numpy(adx_valid)
+    y_valid = torch.from_numpy(adx_valid).to(device)
 
     # Create TensorDataset and DataLoader
     train_dataset = TensorDataset(x_train, y_train)

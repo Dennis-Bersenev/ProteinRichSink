@@ -25,13 +25,20 @@ def zscore_normalization_and_svd(X: np.ndarray, n_components):
     X_lowdim = svd.fit_transform(X_normalized)
     return X_lowdim
 
-def zscore_normalization(X: np.ndarray):
-    
-    
-    X_sd = np.std(X, axis=1).reshape(-1, 1)
-    X_sd[X_sd == 0] = 1
-    X_normalized = (X - np.mean(X, axis=1).reshape(-1, 1)) / X_sd
-    return X_normalized
+def min_max_normalize(X: np.ndarray):
+    """
+    Normalize a numpy array to the range [0, 1] using min-max normalization.
+
+    Parameters:
+    array (np.ndarray): The numpy array to normalize.
+
+    Returns:
+    np.ndarray: The normalized numpy array.
+    """
+    min_val = np.min(X)
+    max_val = np.max(X)
+    normalized_array = (X - min_val) / (max_val - min_val)
+    return normalized_array
 
 
 # Adapted from: https://github.com/DanHanh/scLinear/blob/main/inst/python/evaluate.py
@@ -120,7 +127,7 @@ def cvae_loss(recon_x, x, mu, logvar, input_dim):
     
     # Check tensor shapes
     assert recon_x.shape == x.shape, f"Shape mismatch: {recon_x.shape} vs {x.shape}"
-    assert recon_x.min() >= 0 and recon_x.max() <= 1, "recon_batch values out of range [0, 1]"
+    assert recon_x.min() >= 0.0 and recon_x.max() <= 1.0, "recon_batch values out of range [0, 1]"
     assert x.min() >= 0 and x.max() <= 1, "data values out of range [0, 1]"
 
     
