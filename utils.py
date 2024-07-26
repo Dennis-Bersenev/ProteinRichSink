@@ -26,7 +26,7 @@ def zscore_normalization_and_svd(X: np.ndarray, n_components):
 
 
 # Adapted from: https://github.com/DanHanh/scLinear/blob/main/inst/python/evaluate.py
-def evaluate(y_pred, y_test, verbose=True):
+def evaluate_correlations(y_pred, y_test, verbose=True):
 
     # Calculate RMSE
     rmse = mean_squared_error(y_pred, y_test, squared=False).item()

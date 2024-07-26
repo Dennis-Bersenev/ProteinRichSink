@@ -2,27 +2,8 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import ot
+import numpy as np
 
-class SinkhornLayer(nn.Module):
-    def __init__(self, epsilon=0.1, max_iter=100, tau=1e-9):
-        super(SinkhornLayer, self).__init__()
-        self.epsilon = epsilon
-        self.max_iter = max_iter
-        self.tau = tau
-
-    def forward(self, x, y):
-        # x and y should be probability distributions
-        C = torch.cdist(x, y, p=2)  # Compute the cost matrix
-        C = C.cpu().detach().numpy()  # Convert to numpy for POT compatibility
-        
-        x = x.cpu().detach().numpy()
-        y = y.cpu().detach().numpy()
-        
-        # Perform Sinkhorn algorithm
-        pi = ot.sinkhorn(x, y, C, self.epsilon, numItermax=self.max_iter, stopThr=self.tau)
-        
-        pi = torch.tensor(pi).to(x.device)  # Convert back to tensor
-        return pi
 
 class MLP(nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -47,31 +28,56 @@ class MLP(nn.Module):
         return x
     
 
+class Sinkhorn(nn.Module):
+    def __init__(self, n_iters=50, epsilon=0.1):
+        super(Sinkhorn, self).__init__()
+        self.n_iters = n_iters
+        self.epsilon = epsilon
 
-class MLPSinkhorn(nn.Module):
+    def forward(self, cost_matrix):
+        n = cost_matrix.size(0)
+        K = torch.exp(-cost_matrix / self.epsilon)
+        u = torch.ones(n).to(cost_matrix.device) / n
+        v = torch.ones(n).to(cost_matrix.device) / n
+        
+        for _ in range(self.n_iters):
+            u = 1.0 / torch.matmul(K, v)
+            v = 1.0 / torch.matmul(K.t(), u)
+        
+        transport_plan = torch.matmul(torch.diag(u), torch.matmul(K, torch.diag(v)))
+        return transport_plan
+
+def cost_matrix(x, y):
+    x_col = x.unsqueeze(1)
+    y_lin = y.unsqueeze(0)
+    C = torch.sum((x_col - y_lin) ** 2, 2)
+    return C
+    
+class MLPWithSinkhorn(nn.Module):
     def __init__(self, input_dim, output_dim):
-        super(MLP, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 256)
+        super(MLPWithSinkhorn, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 256)  
         self.bn1 = nn.BatchNorm1d(256)
         self.dropout1 = nn.Dropout(0.5)
         self.fc2 = nn.Linear(256, 128)
         self.bn2 = nn.BatchNorm1d(128)
         self.dropout2 = nn.Dropout(0.5)
+        self.sinkhorn = Sinkhorn()
         self.fc3 = nn.Linear(128, 64)
         self.bn3 = nn.BatchNorm1d(64)
         self.fc4 = nn.Linear(64, output_dim)
-        
-        self.sinkhorn = SinkhornLayer()
 
-    def forward(self, x, y):
+    def forward(self, x):
         x = torch.relu(self.bn1(self.fc1(x)))
         x = self.dropout1(x)
         x = torch.relu(self.bn2(self.fc2(x)))
         x = self.dropout2(x)
+        
+        # Apply Sinkhorn layer
+        cost = cost_matrix(x, x)
+        transport_plan = self.sinkhorn(cost)
+        x = torch.matmul(transport_plan, x)
+        
         x = torch.relu(self.bn3(self.fc3(x)))
         x = self.fc4(x)
-        
-        # Apply the Sinkhorn layer
-        pi = self.sinkhorn(x, y)
-        
-        return pi
+        return x

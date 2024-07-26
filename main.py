@@ -4,13 +4,67 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from utils import * 
-from models import MLP, MLPSinkhorn
+from models import MLP, MLPWithSinkhorn
 import torch.nn as nn
 import torch.optim as optim
 import argparse
 import math
 import matplotlib.pyplot as plt
 import muon 
+
+
+
+
+"""
+TODO:
+0. Better software engineering etc
+1. Add the Sinkhorn layers!
+2. More robust testing!
+3. More models with OT!
+"""
+
+
+def train(model, train_loader, criterion, optimizer, device):
+    model.train()
+    running_loss = 0.0
+    for inputs, labels in train_loader:
+        inputs, labels = inputs.to(device), labels.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        
+        running_loss += loss.item() * inputs.size(0)
+    
+    epoch_loss = running_loss / len(train_loader.dataset)
+    return epoch_loss
+
+def evaluate(model, test_loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            running_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            _, labels_max = torch.max(labels, 1)
+            total += labels.size(0)
+            correct += (predicted == labels_max).sum().item()
+    
+    epoch_loss = running_loss / len(test_loader.dataset)
+    accuracy = correct / total
+    return epoch_loss, accuracy
+
+
+
 
 
 def main():
@@ -71,11 +125,12 @@ def main():
     output_size = protein_norm.shape[1]     # Number of unique proteins
     latent_size = 64                        # For VAEs
     learning_rate = 0.001
-    num_epochs = 100
+    num_epochs = args.epochs
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
     x_valid = torch.from_numpy(gex_valid).to(device)
+    
 
     y_train = torch.from_numpy(adx_train).to(device)
     y_test = torch.from_numpy(adx_test).to(device)
@@ -84,65 +139,49 @@ def main():
     # Create TensorDataset and DataLoader
     train_dataset = TensorDataset(x_train, y_train)
     test_dataset = TensorDataset(x_test, y_test)
+    valid_dataset = TensorDataset(x_valid, y_valid)
 
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+    valid_loader = DataLoader(valid_dataset, batch_size=64, shuffle=False)
 
 
     if args.model == 'SH':
-        model = MLPSinkhorn(input_size, output_size).to(device)
+        model = MLPWithSinkhorn(input_size, output_size).to(device)
     else:
         model = MLP(input_size, output_size).to(device)
     
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    """
-    TODO:
-    0. Better software engineering etc
-    1. Add the Sinkhorn layers!
-    2. More robust testing!
-    3. More models with OT!
-    """
 
-    # Training 
+    # Initialize model, loss function, and optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Training/Eval loop
     train_mse_vals = []
     best_train_loss = float("inf")
     for epoch in range(num_epochs):
-        model.train()
-        train_loss = 0.0
-        for X_batch, Y_batch in train_loader:
-            optimizer.zero_grad()
-            outputs = model(X_batch)
-            loss = criterion(outputs, Y_batch)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item() * X_batch.size(0)
+        train_loss = train(model, train_loader, criterion, optimizer, device)
+        test_loss, test_accuracy = evaluate(model, test_loader, criterion, device)
         
-        train_loss /= len(train_loader.dataset)
-        
+        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"Train Loss: {train_loss:.4f}")
+        print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
+
         train_mse_vals.append(train_loss)
-        
-        print(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}')
         
         if train_loss < best_train_loss:
             best_train_loss = train_loss
             torch.save(model.state_dict(), f'./models/{args.model}.pth')
     
-
+    
     ################################################### Evals ###################################################
     
-    # Final evaluation on test set
-    model.eval()  # Set the model to evaluation mode
-    test_loss = 0.0
-    with torch.no_grad():  # Disable gradient computation for evaluation
-        for X_batch, Y_batch in test_loader:
-            outputs = model(X_batch)
-            loss = criterion(outputs, Y_batch)
-            test_loss += loss.item() * X_batch.size(0)
-    test_loss /= len(test_loader.dataset)
-    print(f'Test Loss: {test_loss:.4f}')
-
+    # Final evaluation on the validation set
+    valid_loss, valid_accuracy = evaluate(model, valid_loader, criterion, device)
+    print(f"Test Loss: {valid_loss:.4f}, Test Accuracy: {valid_accuracy:.4f}")
     
     # Plotting the MSE over epochs
     plt.figure(figsize=(10, 5))
@@ -154,9 +193,10 @@ def main():
     plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
     plt.show()
 
+    
     # NOTE: original author eval metric
     y_pred = model(x_valid)
-    rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_valid, verbose=True)
+    rmse, pearson_corr, spearman_corr = evaluate_correlations(y_pred, y_valid, verbose=True)
     
 
     # Saving statistics to text file
