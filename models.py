@@ -1,41 +1,9 @@
 import torch.nn as nn
 import torch
-from torch.nn import functional as F
+import torch.nn.functional as F
+import ot
+import numpy as np
 
-class VAE(nn.Module):
-    def __init__(self, input_dim, latent_dim):
-        super(VAE, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 1024)
-        self.fc2 = nn.Linear(1024, 512)
-        self.fc3 = nn.Linear(512, 256)
-        self.fc4_mean = nn.Linear(256, latent_dim)
-        self.fc4_log_var = nn.Linear(256, latent_dim)
-        self.fc5 = nn.Linear(latent_dim, 256)
-        self.fc6 = nn.Linear(256, 512)
-        self.fc7 = nn.Linear(512, 1024)
-        self.fc8 = nn.Linear(1024, input_dim)
-        
-    def encode(self, x):
-        h = torch.relu(self.fc1(x))
-        h = torch.relu(self.fc2(h))
-        h = torch.relu(self.fc3(h))
-        return self.fc4_mean(h), self.fc4_log_var(h)
-    
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-    
-    def decode(self, z):
-        h = torch.relu(self.fc5(z))
-        h = torch.relu(self.fc6(h))
-        h = torch.relu(self.fc7(h))
-        return torch.sigmoid(self.fc8(h))
-    
-    def forward(self, x):
-        mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
 
 class MLP(nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -67,57 +35,60 @@ class MLP(nn.Module):
         x = self.dropout2(x)
 
         x = torch.relu(self.bn3(self.fc3(x)))
-        x = self.dropout3(x)
-
-        x = torch.relu(self.bn4(self.fc4(x)))
-        x = self.dropout4(x)
-
-        x = torch.relu(self.bn5(self.fc5(x)))
-        x = self.fc6(x)
+        x = self.fc4(x)
         return x
     
 
+class Sinkhorn(nn.Module):
+    def __init__(self, n_iters=50, epsilon=0.1):
+        super(Sinkhorn, self).__init__()
+        self.n_iters = n_iters
+        self.epsilon = epsilon
 
-class CVAE(nn.Module):
-    def __init__(self, input_dim, latent_dim, cond_dim, hidden_dims):
-        super(CVAE, self).__init__()
+    def forward(self, cost_matrix):
+        n = cost_matrix.size(0)
+        K = torch.exp(-cost_matrix / self.epsilon)
+        u = torch.ones(n).to(cost_matrix.device) / n
+        v = torch.ones(n).to(cost_matrix.device) / n
         
-        # Encoder layers
-        self.encoder_layers = nn.ModuleList()
-        in_dim = input_dim + cond_dim
-        for h_dim in hidden_dims:
-            self.encoder_layers.append(nn.Linear(in_dim, h_dim))
-            in_dim = h_dim
-        self.fc21 = nn.Linear(hidden_dims[-1], latent_dim)
-        self.fc22 = nn.Linear(hidden_dims[-1], latent_dim)
+        for _ in range(self.n_iters):
+            u = 1.0 / torch.matmul(K, v)
+            v = 1.0 / torch.matmul(K.t(), u)
         
-        # Decoder layers
-        self.decoder_layers = nn.ModuleList()
-        in_dim = latent_dim + cond_dim
-        for h_dim in reversed(hidden_dims):
-            self.decoder_layers.append(nn.Linear(in_dim, h_dim))
-            in_dim = h_dim
-        self.fc4 = nn.Linear(hidden_dims[0], input_dim)
-    
-    def encode(self, x, c):
-        xc = torch.cat((x, c), dim=1)
-        for layer in self.encoder_layers:
-            xc = F.relu(layer(xc))
-        return self.fc21(xc), self.fc22(xc)
-    
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-    
-    def decode(self, z, c):
-        zc = torch.cat((z, c), dim=1)
-        for layer in self.decoder_layers:
-            zc = F.relu(layer(zc))
-        return torch.sigmoid(self.fc4(zc))
-    
-    def forward(self, x, c):
-        mu, logvar = self.encode(x, c)
-        z = self.reparameterize(mu, logvar)
-        return self.decode(z, c), mu, logvar
+        transport_plan = torch.matmul(torch.diag(u), torch.matmul(K, torch.diag(v)))
+        return transport_plan
 
+def cost_matrix(x, y):
+    x_col = x.unsqueeze(1)
+    y_lin = y.unsqueeze(0)
+    C = torch.sum((x_col - y_lin) ** 2, 2)
+    return C
+    
+class MLPWithSinkhorn(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(MLPWithSinkhorn, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 256)  
+        self.bn1 = nn.BatchNorm1d(256)
+        self.dropout1 = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(256, 128)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.dropout2 = nn.Dropout(0.5)
+        self.sinkhorn = Sinkhorn()
+        self.fc3 = nn.Linear(128, 64)
+        self.bn3 = nn.BatchNorm1d(64)
+        self.fc4 = nn.Linear(64, output_dim)
+
+    def forward(self, x):
+        x = torch.relu(self.bn1(self.fc1(x)))
+        x = self.dropout1(x)
+        x = torch.relu(self.bn2(self.fc2(x)))
+        x = self.dropout2(x)
+        
+        # Apply Sinkhorn layer
+        cost = cost_matrix(x, x)
+        transport_plan = self.sinkhorn(cost)
+        x = torch.matmul(transport_plan, x)
+        
+        x = torch.relu(self.bn3(self.fc3(x)))
+        x = self.fc4(x)
+        return x

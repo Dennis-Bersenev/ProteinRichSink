@@ -4,7 +4,8 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset, random_split
 import numpy as np
 from utils import * 
-from models import VAE, MLP, CVAE
+
+from models import MLP, MLPWithSinkhorn
 import torch.nn as nn
 import torch.optim as optim
 import argparse
@@ -13,16 +14,68 @@ import matplotlib.pyplot as plt
 import muon 
 
 
-def main():
 
-    ################################################### Arg Parsing #####################################################
+
+"""
+TODO:
+0. Better software engineering etc
+1. Add the Sinkhorn layers!
+2. More robust testing!
+3. More models with OT!
+"""
+
+
+def train(model, train_loader, criterion, optimizer, device):
+    model.train()
+    running_loss = 0.0
+    for inputs, labels in train_loader:
+        inputs, labels = inputs.to(device), labels.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        
+        running_loss += loss.item() * inputs.size(0)
+    
+    epoch_loss = running_loss / len(train_loader.dataset)
+    return epoch_loss
+
+def evaluate(model, test_loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            running_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            _, labels_max = torch.max(labels, 1)
+            total += labels.size(0)
+            correct += (predicted == labels_max).sum().item()
+    
+    epoch_loss = running_loss / len(test_loader.dataset)
+    accuracy = correct / total
+    return epoch_loss, accuracy
+
+
+
+
+
+def main():
+     ################################################### Arg Parsing #####################################################
     # Parsing model from command line
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='ffnn or cvae')
+    parser.add_argument('--model', type=str, required=True, help='MLP or SH')
     parser.add_argument('--desc', type=str, required=True, help='describe the experiment for bookkeeping')
     parser.add_argument('--epochs', type=int, required=True, help='how many epochs do you want all neural nets to use?')
     args = parser.parse_args()
-    
 
     ################################################### Data Prep #####################################################
     data = "data/pbmc_10k_protein_v3_raw_feature_bc_matrix.h5"
@@ -69,11 +122,10 @@ def main():
     print(f'Normalized Protein array shape: {protein_norm.shape}')
     print(f'Original RNA shape: {rna.X.shape}')
     print(f'Original Protein shape: {protein.X.shape}')
-    
+
     ################################################### ML Training ###################################################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
-    
 
     # Hyperparameters
     input_size = rna_norm.shape[1]          # Number of unique rna molecules
@@ -81,10 +133,7 @@ def main():
     latent_size = output_size               # For VAEs: you choose, doesn't theoretically matter
     conditional_size = output_size          # For CVAEs: based on protein dataset shape
     learning_rate = 0.001
-    c = 3 # scaling factor
-    hidden_dims = [c*1024, c*512, c*256, c*128]  
-
-    # print(f'IN: {input_size}, latent: {output_size}, conditional: {conditional_size}')
+    num_epochs = args.epochs
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
@@ -97,72 +146,49 @@ def main():
     # Create TensorDataset and DataLoader
     train_dataset = TensorDataset(x_train, y_train)
     test_dataset = TensorDataset(x_test, y_test)
+    valid_dataset = TensorDataset(x_valid, y_valid)
 
-    # Some debugging checks
-    print(f'train GEX shape: {x_train.shape}')
-    print(f'test GEX  shape: {x_test.shape}')
-    
-    print(f'train ADX shape: {y_train.shape}')
-    print(f'test ADX shape: {y_test.shape}')
-    
-
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
-    
-    model = CVAE(input_dim=input_size, latent_dim=latent_size, cond_dim=conditional_size, hidden_dims=hidden_dims).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    
-    train_loss_arr = []
-    
-    for epoch in range(args.epochs):
-        model.train()
-        train_loss = 0
-        for batch_idx, (data, target) in enumerate(train_loader):  
-            data, target = data.to(device), target.to(device)
-        
-            optimizer.zero_grad()
-            
-            recon_batch, mu, logvar = model(data, target)
-            
-            # Debugging checks
-            if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
-                print(f"recon_batch values out of range at batch {batch_idx}")
-            
-            loss = cvae_loss(recon_batch, data, mu, logvar, input_size)
-            loss.backward()
-            train_loss += loss.item()
-            optimizer.step()
-        
-        print(f'Epoch {epoch + 1}, Loss: {train_loss / len(train_loader.dataset)}')
+    valid_loader = DataLoader(valid_dataset, batch_size=64, shuffle=False)
 
-        train_loss_arr.append(train_loss / len(train_loader.dataset))
+
+    if args.model == 'SH':
+        model = MLPWithSinkhorn(input_size, output_size).to(device)
+    else:
+        model = MLP(input_size, output_size).to(device)
+    
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+
+    # Initialize model, loss function, and optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Training/Eval loop
+    train_mse_vals = []
+    best_train_loss = float("inf")
+    for epoch in range(num_epochs):
+        train_loss = train(model, train_loader, criterion, optimizer, device)
+        test_loss, test_accuracy = evaluate(model, test_loader, criterion, device)
+        
+        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"Train Loss: {train_loss:.4f}")
+        print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
+
+        train_mse_vals.append(train_loss)
+        
+        if train_loss < best_train_loss:
+            best_train_loss = train_loss
+            torch.save(model.state_dict(), f'./models/{args.model}.pth')
+    
     
     ################################################### Evals ###################################################
-    # Final evaluation on test set
-    model.eval()  # Set the model to evaluation mode
-    test_loss = 0
     
-    with torch.no_grad():  
-        for batch_idx, (data, target) in enumerate(test_loader):  
-            data, target = data.to(device), target.to(device)
-            
-            recon_batch, mu, logvar = model(data, target)
-
-            # Debugging checks
-            if not (recon_batch.min() >= 0 and recon_batch.max() <= 1):
-                print(f"recon_batch values out of range at batch {batch_idx}")
-            
-            loss = cvae_loss(recon_batch, data, mu, logvar, input_size)
-            test_loss += loss.item()
-    
-    test_loss /= len(test_loader.dataset)
-    print(f'Test Loss: {test_loss}')
-
-
-    # NOTE: original author eval metric
-    y_pred = sample_from_latent(model, x_valid, y_valid, device=device)
-    rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_valid, verbose=True)
-    
+    # Final evaluation on the validation set
+    valid_loss, valid_accuracy = evaluate(model, valid_loader, criterion, device)
+    print(f"Test Loss: {valid_loss:.4f}, Test Accuracy: {valid_accuracy:.4f}")
     
     # Plotting the loss over epochs
     plt.figure(figsize=(10, 5))
@@ -171,8 +197,14 @@ def main():
     plt.ylabel('Loss')
     plt.title(f'{args.desc}: Loss During Training')
     plt.legend()
-    plt.savefig(f'./results/{args.model}_loss_training_plot.png')  # Save the plot as a PNG file
-    # plt.show()
+    plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
+    plt.show()
+
+    
+    # NOTE: original author eval metric
+    y_pred = model(x_valid)
+    rmse, pearson_corr, spearman_corr = evaluate_correlations(y_pred, y_valid, verbose=True)
+    
 
     # Saving statistics to text file
     stat1 = f'Train Loss: {train_loss:.4f}'
@@ -199,4 +231,4 @@ TODO:
 """
 
 if __name__ == "__main__":
-    main()
+    main()  
