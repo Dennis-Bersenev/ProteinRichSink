@@ -89,7 +89,7 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
     # NOTE: hardcoding FFNN for now
-    model = FFNN()
+    model = MLP(input_size, output_size).to(device)
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -151,7 +151,7 @@ def main():
     plt.show()
 
     # NOTE: original author eval metric
-    y_pred = model(x_test)
+    y_pred = model(x_valid)
     rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_valid, verbose=True)
     
 

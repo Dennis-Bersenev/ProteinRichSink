@@ -1,15 +1,6 @@
 import torch.nn as nn
 import torch
 
-class FFNN:
-    def __init__(self):
-        pass
-
-
-class VAE:
-    def __init__(self):
-        pass
-
 class MLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(MLP, self).__init__()
