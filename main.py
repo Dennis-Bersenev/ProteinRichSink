@@ -1,9 +1,10 @@
 import scanpy as sc
 import torch
 import anndata as ad
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, random_split
 import numpy as np
 from utils import * 
+
 from models import MLP, MLPWithSinkhorn
 import torch.nn as nn
 import torch.optim as optim
@@ -82,8 +83,8 @@ def main():
 
     adata.var_names_make_unique()
     adata.layers["counts"] = adata.X.copy()
-    sc.pp.filter_genes(adata, min_counts=100) # number of times that RNA is present in the dataset
-    sc.pp.filter_cells(adata, min_counts=500) # number of biomolecules in each cell
+    sc.pp.filter_genes(adata, min_counts=50) # number of times that RNA is present in the dataset
+    sc.pp.filter_cells(adata, min_counts=100) # number of biomolecules in each cell
 
     protein = adata[:, adata.var["feature_types"] == "Antibody Capture"].copy()
     rna = adata[:, adata.var["feature_types"] == "Gene Expression"].copy()
@@ -94,12 +95,19 @@ def main():
     protein = protein[common_cells, :]
     rna = rna[common_cells, :]
     
-    # Doing normalization and SVD steps
+    # RNA Normalization
     sc.pp.log1p(rna)
-    rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    # rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
+    rna_norm = min_max_normalize(rna.X.toarray()) # If skipping dim reduction step
+    
+    
+    # Protein Normalization 
     muon.prot.pp.clr(protein)
     protein_norm = protein.X.toarray()
     
+
+
+
     # 80/20 split rule
     split = math.ceil(rna_norm.shape[0] * 0.8)
     validation_split = math.ceil(rna_norm.shape[0] * 0.95)
@@ -121,16 +129,15 @@ def main():
 
     # Hyperparameters
     input_size = rna_norm.shape[1]          # Number of unique rna molecules
-    hidden_size = 512                       # Hyper-parameter
     output_size = protein_norm.shape[1]     # Number of unique proteins
-    latent_size = 64                        # For VAEs
+    latent_size = output_size               # For VAEs: you choose, doesn't theoretically matter
+    conditional_size = output_size          # For CVAEs: based on protein dataset shape
     learning_rate = 0.001
     num_epochs = args.epochs
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
     x_valid = torch.from_numpy(gex_valid).to(device)
-    
 
     y_train = torch.from_numpy(adx_train).to(device)
     y_test = torch.from_numpy(adx_test).to(device)
@@ -183,12 +190,12 @@ def main():
     valid_loss, valid_accuracy = evaluate(model, valid_loader, criterion, device)
     print(f"Test Loss: {valid_loss:.4f}, Test Accuracy: {valid_accuracy:.4f}")
     
-    # Plotting the MSE over epochs
+    # Plotting the loss over epochs
     plt.figure(figsize=(10, 5))
-    plt.plot(range(1, num_epochs + 1), train_mse_vals, label='MSE Training Vals')
+    plt.plot(range(1, args.epochs + 1), train_loss_arr, label='Training Loss')
     plt.xlabel('Epoch')
-    plt.ylabel('Mean Squared Error')
-    plt.title(f'{args.desc}: MSE During Training')
+    plt.ylabel('Loss')
+    plt.title(f'{args.desc}: Loss During Training')
     plt.legend()
     plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
     plt.show()
@@ -215,6 +222,13 @@ def main():
         file.write(stats)
     
 
+
+"""
+TODO:
+1. Tune the VAE approach.
+2. Add evals across protein types to see which proteins have the best/worst scores 
+3. Add the Sinkhorn layers!
+"""
 
 if __name__ == "__main__":
     main()  
