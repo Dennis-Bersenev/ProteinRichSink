@@ -14,6 +14,14 @@ import muon
 
 
 def main():
+     ################################################### Arg Parsing #####################################################
+    # Parsing model from command line
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, required=True, help='ffnn or cvae')
+    parser.add_argument('--desc', type=str, required=True, help='describe the experiment for bookkeeping')
+    parser.add_argument('--epochs', type=int, required=True, help='how many epochs do you want all neural nets to use?')
+    args = parser.parse_args()
+
     ################################################### Data Prep #####################################################
     data = "data/pbmc_10k_protein_v3_raw_feature_bc_matrix.h5"
     adata = sc.read_10x_h5(data, genome=None, gex_only=False, backup_url=None)
@@ -40,26 +48,22 @@ def main():
     
     # 80/20 split rule
     split = math.ceil(rna_norm.shape[0] * 0.8)
+    validation_split = math.ceil(rna_norm.shape[0] * 0.95)
     gex_train = rna_norm[:split, :]
-    gex_test = rna_norm[split:, :]
+    gex_test = rna_norm[split:validation_split, :]
+    gex_valid =  rna_norm[validation_split:, :]
 
     adx_train = protein_norm[:split, :]
-    adx_test = protein_norm[split:, :]
-    # print(rna_norm.shape)
-    # print(protein_norm.shape)
-    # print(gex_train.shape)
-    # print(adx_train.shape)
-    
+    adx_test = protein_norm[split:validation_split, :]
+    adx_valid = protein_norm[validation_split:, :]
+    print(f'Normalized RNA array shape: {rna_norm.shape}')
+    print(f'Normalized Protein array shape: {protein_norm.shape}')
+    print(f'Original RNA shape: {rna.X.shape}')
+    print(f'Original Protein shape: {protein.X.shape}')
+
     ################################################### ML Training ###################################################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
-    
-    # Parsing model from command line
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='ffnn, vae, todo')
-    parser.add_argument('--desc', type=str, required=True, help='describe the experiment')
-    args = parser.parse_args()
-    
 
     # Hyperparameters
     input_size = rna_norm.shape[1]          # Number of unique rna molecules
@@ -71,10 +75,11 @@ def main():
 
     x_train = torch.from_numpy(gex_train).to(device)
     x_test = torch.from_numpy(gex_test).to(device)
+    x_valid = torch.from_numpy(gex_valid).to(device)
 
     y_train = torch.from_numpy(adx_train).to(device)
     y_test = torch.from_numpy(adx_test).to(device)
-
+    y_valid = torch.from_numpy(adx_valid).to(device)
 
     # Create TensorDataset and DataLoader
     train_dataset = TensorDataset(x_train, y_train)
@@ -83,34 +88,17 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-
-    # 1) FFNN
-    if args.model == 'ffnn':
-        model = FFNN()
-    
-    # 2 VAE
-    elif args.model == 'vae': 
-        model = VAE()
-    
-    # 3 MLP
-    elif args.model == 'mlp': 
-        model = MLP(input_size, output_size).to(device)
-    
-    else:
-        print("Testing")
-        # for batch_X, batch_y in train_loader:
-        #     print(batch_X, batch_y)
-        return
-    
+    # NOTE: hardcoding FFNN for now
+    model = FFNN()
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     """
     TODO:
-    0. Make another file for re-running existing models! And add some code to save the stats
-    1. Make the models better, manually
-    2. Add the Sinkhorn layers!
+    0. Better software engineering etc
+    1. Add the Sinkhorn layers!
+    2. More robust testing!
     """
 
     # Training 
@@ -138,7 +126,8 @@ def main():
             torch.save(model.state_dict(), f'./models/{args.model}.pth')
     
 
-    # Evals
+    ################################################### Evals ###################################################
+    
     # Final evaluation on test set
     model.eval()  # Set the model to evaluation mode
     test_loss = 0.0
@@ -150,10 +139,6 @@ def main():
     test_loss /= len(test_loader.dataset)
     print(f'Test Loss: {test_loss:.4f}')
 
-    # NOTE: author eval metric
-    y_pred = model(x_test)
-    evaluate(y_pred, y_test, verbose=True)
-    
     
     # Plotting the MSE over epochs
     plt.figure(figsize=(10, 5))
@@ -164,6 +149,26 @@ def main():
     plt.legend()
     plt.savefig(f'./results/{args.model}_mse_training_plot.png')  # Save the plot as a PNG file
     plt.show()
+
+    # NOTE: original author eval metric
+    y_pred = model(x_test)
+    rmse, pearson_corr, spearman_corr = evaluate(y_pred, y_valid, verbose=True)
+    
+
+    # Saving statistics to text file
+    stat1 = f'Train Loss: {train_loss:.4f}'
+    stat2 = f'Test Loss: {test_loss:.4f}'
+    stat3 = f"RMSE: {rmse}"
+    stat4 = f"Pearson correlation: {pearson_corr}"
+    stat5 = f"Spearman correlation: {spearman_corr}"
+    stats = "\n".join([stat1, stat2, stat3, stat4, stat5])
+
+    # Specify the filename
+    filename = "./results/stats.txt"
+
+    # Write the strings to the file
+    with open(filename, "w") as file:
+        file.write(stats)
     
 
 
