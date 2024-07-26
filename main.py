@@ -4,7 +4,7 @@ import anndata as ad
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from utils import * 
-from models import FFNN, VAE, MLP
+from models import MLP, MLPSinkhorn
 import torch.nn as nn
 import torch.optim as optim
 import argparse
@@ -17,7 +17,7 @@ def main():
      ################################################### Arg Parsing #####################################################
     # Parsing model from command line
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='ffnn or cvae')
+    parser.add_argument('--model', type=str, required=True, help='MLP or SH')
     parser.add_argument('--desc', type=str, required=True, help='describe the experiment for bookkeeping')
     parser.add_argument('--epochs', type=int, required=True, help='how many epochs do you want all neural nets to use?')
     args = parser.parse_args()
@@ -88,9 +88,12 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-    # NOTE: hardcoding FFNN for now
-    model = MLP(input_size, output_size).to(device)
 
+    if args.model == 'SH':
+        model = MLPSinkhorn(input_size, output_size).to(device)
+    else:
+        model = MLP(input_size, output_size).to(device)
+    
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -99,6 +102,7 @@ def main():
     0. Better software engineering etc
     1. Add the Sinkhorn layers!
     2. More robust testing!
+    3. More models with OT!
     """
 
     # Training 
