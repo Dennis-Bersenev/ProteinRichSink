@@ -14,16 +14,6 @@ import muon
 
 
 
-
-"""
-TODO:
-0. Better software engineering etc
-1. Add the Sinkhorn layers!
-2. More robust testing!
-3. More models with OT!
-"""
-
-
 def train(model, train_loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
@@ -99,7 +89,11 @@ def main():
     rna_norm = zscore_normalization_and_svd(rna.X.toarray(), n_components=300) # Same as ScLinear authors
     muon.prot.pp.clr(protein)
     protein_norm = protein.X.toarray()
+
+    # Saving mapping of 0-16 to protein names via array.
+    protein_names = [item.split('_')[0] for item in protein.var_names]
     
+
     # 80/20 split rule
     split = math.ceil(rna_norm.shape[0] * 0.8)
     validation_split = math.ceil(rna_norm.shape[0] * 0.95)
@@ -195,7 +189,7 @@ def main():
 
     
     y_pred = model(x_valid)
-    evals_by_category(y_pred, y_valid, output_size, 'results/stats_by_protein.txt')
+    evals_by_category(y_pred, y_valid, output_size, 'results/stats_by_protein.txt', protein_names)
     
     # NOTE: original author eval metric
     rmse, pearson_corr, spearman_corr = evaluate_correlations(y_pred, y_valid, verbose=True)
