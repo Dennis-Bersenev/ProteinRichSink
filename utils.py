@@ -3,6 +3,9 @@ import torch
 import numpy as np
 from sklearn.decomposition import TruncatedSVD
 from torchmetrics.functional import mean_squared_error, pearson_corrcoef, spearman_corrcoef
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 
@@ -49,3 +52,70 @@ def evaluate_correlations(y_pred, y_test, verbose=True):
         print("Spearman correlation:", spearman_corr)
         
     return rmse, pearson_corr, spearman_corr
+
+# Gets eval stats per category (where category is the protein abundance level being predicted)
+def evals_by_category(y_hat, y, num_proteins, outpath):
+
+    # Convert PyTorch tensors to NumPy arrays
+    y_true = y.detach().cpu().numpy()
+    y_pred = y_hat.detach().cpu().numpy()
+
+    # Split into individual components
+    y_true_split = [y_true[:, i] for i in num_proteins]
+    y_pred_split = [y_pred[:, i] for i in num_proteins]
+
+
+    mae = [mean_absolute_error(y_true_split[i], y_pred_split[i]) for i in range(17)]
+    mse = [mean_squared_error(y_true_split[i], y_pred_split[i]) for i in range(17)]
+    r2 = [r2_score(y_true_split[i], y_pred_split[i]) for i in range(17)]
+
+    # Display the results
+    for i in range(num_proteins):
+        s = f"Category {i+1}: MAE = {mae[i]}, MSE = {mse[i]}, R² = {r2[i]}"
+        print(s)
+        with open(outpath, "w") as file:
+            file.write(s)
+    
+    categories = range(1, num_proteins)
+
+    plt.figure(figsize=(15, 5))
+
+    # Plot MAE
+    plt.subplot(1, 3, 1)
+    plt.bar(categories, mae)
+    plt.xlabel('Category')
+    plt.ylabel('MAE')
+    plt.title('Mean Absolute Error per Category')
+    plt.savefig('results/mae_per_category.png')
+
+    # Plot MSE
+    plt.subplot(1, 3, 2)
+    plt.bar(categories, mse)
+    plt.xlabel('Category')
+    plt.ylabel('MSE')
+    plt.title('Mean Squared Error per Category')
+    plt.savefig('results/mse_per_category.png')
+
+    # Plot R²
+    plt.subplot(1, 3, 3)
+    plt.bar(categories, r2)
+    plt.xlabel('Category')
+    plt.ylabel('R²')
+    plt.title('R² per Category')
+    plt.savefig('results/r2_per_category.png')
+
+    plt.tight_layout()
+    plt.savefig('results/metrics_per_category.png')
+    plt.show()
+
+    plt.figure(figsize=(15, 10))
+    for i in range(num_proteins):
+        plt.subplot(4, 5, i+1)
+        sns.histplot(y_true_split[i] - y_pred_split[i], kde=True)
+        plt.title(f'Category {i+1}')
+    plt.tight_layout()
+    plt.savefig('results/error_distribution_per_category.png')
+    plt.show()
+    
+    
+    return

@@ -194,8 +194,10 @@ def main():
     plt.show()
 
     
-    # NOTE: original author eval metric
     y_pred = model(x_valid)
+    evals_by_category(y_pred, y_valid, output_size, 'results/stats_by_protein.txt')
+    
+    # NOTE: original author eval metric
     rmse, pearson_corr, spearman_corr = evaluate_correlations(y_pred, y_valid, verbose=True)
     
 
