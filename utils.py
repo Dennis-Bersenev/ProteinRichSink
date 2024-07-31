@@ -27,6 +27,21 @@ def zscore_normalization_and_svd(X: np.ndarray, n_components):
     X_lowdim = svd.fit_transform(X_normalized)
     return X_lowdim
 
+def min_max_normalize(X: np.ndarray):
+    """
+    Normalize a numpy array to the range [0, 1] using min-max normalization.
+
+    Parameters:
+    array (np.ndarray): The numpy array to normalize.
+
+    Returns:
+    np.ndarray: The normalized numpy array.
+    """
+    min_val = np.min(X)
+    max_val = np.max(X)
+    normalized_array = (X - min_val) / (max_val - min_val)
+    return normalized_array
+
 
 # Adapted from: https://github.com/DanHanh/scLinear/blob/main/inst/python/evaluate.py
 def evaluate_correlations(y_hat, y, verbose=True):
