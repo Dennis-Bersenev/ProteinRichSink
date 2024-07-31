@@ -160,6 +160,7 @@ def main():
     # Training/Eval loop
     train_mse_vals = []
     best_train_loss = float("inf")
+    train_loss_arr = []
     for epoch in range(num_epochs):
         train_loss = train(model, train_loader, criterion, optimizer, device)
         test_loss, test_accuracy = evaluate(model, test_loader, criterion, device)
@@ -167,7 +168,7 @@ def main():
         print(f"Epoch {epoch+1}/{num_epochs}")
         print(f"Train Loss: {train_loss:.4f}")
         print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
-
+        train_loss_arr.append(train_loss)
         train_mse_vals.append(train_loss)
         
         if train_loss < best_train_loss:
@@ -214,14 +215,6 @@ def main():
     with open(filename, "w") as file:
         file.write(stats)
     
-
-
-"""
-TODO:
-1. Tune the VAE approach.
-2. Add evals across protein types to see which proteins have the best/worst scores 
-3. Add the Sinkhorn layers!
-"""
 
 if __name__ == "__main__":
     main()  
