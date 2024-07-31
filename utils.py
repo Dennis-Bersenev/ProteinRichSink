@@ -78,48 +78,66 @@ def evals_by_category(y_hat, y, num_proteins, outpath, protein_names):
         with open(outpath, "w") as file:
             file.write(s)
     
-    plt.figure(figsize=(15, 5))
+    palette = sns.color_palette("husl", 17)
+
+    # Plot metrics
+    plt.figure(figsize=(20, 8))
 
     # Plot MAE
     plt.subplot(1, 3, 1)
-    plt.bar(protein_names, mae)
-    plt.xlabel('protein_names')
-    plt.ylabel('MAE')
-    plt.title('Mean Absolute Error per Protein')
-    plt.xticks(rotation=45)
+    bars = plt.bar(protein_names, mae, color=palette)
+    plt.xlabel('protein_names', fontsize=12)
+    plt.ylabel('MAE', fontsize=12)
+    plt.title('Mean Absolute Error per protein', fontsize=14)
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, round(yval, 2), ha='center', va='bottom', fontsize=10)
     plt.savefig('results/mae_per_protein.png')
 
     # Plot MSE
     plt.subplot(1, 3, 2)
-    plt.bar(protein_names, mse)
-    plt.xlabel('Category')
-    plt.ylabel('MSE')
-    plt.title('Mean Squared Error per Protein')
-    plt.xticks(rotation=45)
+    bars = plt.bar(protein_names, mse, color=palette)
+    plt.xlabel('protein_names', fontsize=12)
+    plt.ylabel('MSE', fontsize=12)
+    plt.title('Mean Squared Error per protein', fontsize=14)
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, round(yval, 2), ha='center', va='bottom', fontsize=10)
     plt.savefig('results/mse_per_protein.png')
+
 
     # Plot R²
     plt.subplot(1, 3, 3)
-    plt.bar(protein_names, r2)
-    plt.xlabel('Category')
-    plt.ylabel('R²')
-    plt.title('R² per Protein')
-    plt.xticks(rotation=45)
-    plt.savefig('results/r2_per_protein.png')
+    bars = plt.bar(protein_names, r2, color=palette)
+    plt.xlabel('protein_names', fontsize=12)
+    plt.ylabel('R²', fontsize=12)
+    plt.title('R² per protein', fontsize=14)
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, round(yval, 2), ha='center', va='bottom', fontsize=10)
 
     plt.tight_layout()
-    plt.xticks(rotation=45)
-    plt.savefig('results/metrics_per_protein.png')
+    plt.savefig('metrics_per_protein.png')
     plt.show()
 
-    plt.figure(figsize=(15, 10))
+    plt.figure(figsize=(22, 15))
     for i in range(num_proteins):
         plt.subplot(4, 5, i+1)
-        sns.histplot(y_true_split[i] - y_pred_split[i], kde=True)
-        plt.title(protein_names[i])
+        sns.histplot(y_true_split[i] - y_pred_split[i], kde=True, color=palette[i])
+        plt.title(protein_names[i], fontsize=12)
+        plt.xlabel('Error', fontsize=10)
+        plt.ylabel('Density', fontsize=10)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.xticks(fontsize=8)
+        plt.yticks(fontsize=8)
     plt.tight_layout()
-    plt.xticks(rotation=45)
-    plt.savefig('results/error_distribution_per_protein.png')
+    plt.savefig('error_distribution_per_protein.png')
     plt.show()
     
     
