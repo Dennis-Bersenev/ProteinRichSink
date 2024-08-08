@@ -65,18 +65,22 @@ def cost_matrix(x, y):
     return C
     
 class MLPWithSinkhorn(nn.Module):
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim, output_dim, hidden_size):
         super(MLPWithSinkhorn, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 256)  
-        self.bn1 = nn.BatchNorm1d(256)
+        hidden_one = hidden_size
+        hidden_two = hidden_size // 2
+        hidden_three = hidden_size // 4
+        
+        self.fc1 = nn.Linear(input_dim, hidden_one)  
+        self.bn1 = nn.BatchNorm1d(hidden_one)
         self.dropout1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(256, 128)
-        self.bn2 = nn.BatchNorm1d(128)
+        self.fc2 = nn.Linear(hidden_one, hidden_two)
+        self.bn2 = nn.BatchNorm1d(hidden_two)
         self.dropout2 = nn.Dropout(0.5)
         self.sinkhorn = Sinkhorn()
-        self.fc3 = nn.Linear(128, 64)
-        self.bn3 = nn.BatchNorm1d(64)
-        self.fc4 = nn.Linear(64, output_dim)
+        self.fc3 = nn.Linear(hidden_two, hidden_three)
+        self.bn3 = nn.BatchNorm1d(hidden_three)
+        self.fc4 = nn.Linear(hidden_three, output_dim)
 
     def forward(self, x):
         x = torch.relu(self.bn1(self.fc1(x)))

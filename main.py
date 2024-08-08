@@ -123,6 +123,7 @@ def main():
     output_size = protein_norm.shape[1]     # Number of unique proteins
     latent_size = output_size               # For VAEs: you choose, doesn't theoretically matter
     conditional_size = output_size          # For CVAEs: based on protein dataset shape
+    hidden_size = 1024
     learning_rate = 0.001
     num_epochs = args.epochs
 
@@ -145,7 +146,7 @@ def main():
 
 
     if args.model == 'SH':
-        model = MLPWithSinkhorn(input_size, output_size).to(device)
+        model = MLPWithSinkhorn(input_size, output_size, hidden_size).to(device)
     else:
         model = MLP(input_size, output_size).to(device)
     
